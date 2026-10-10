@@ -1,0 +1,44 @@
+name: atlasofcrowns
+description: "Atlas of Crowns: turn-based grand strategy"
+publish_to: 'none'
+
+# Only the first number is set by hand. Releases are numbered v<major>.<n> by
+# .github/workflows/release.yml, which passes the real version to the build;
+# raise the major here to start a new line (v2.0).
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/map/
+    - assets/scenarios/
+
+  fonts:
+    - family: OldStandard
+      fonts:
+        - asset: assets/fonts/OldStandard-Regular.ttf
+        - asset: assets/fonts/OldStandard-Italic.ttf
+          style: italic
+        - asset: assets/fonts/OldStandard-Bold.ttf
+          weight: 700
+    - family: BarlowCondensed
+      fonts:
+        - asset: assets/fonts/BarlowCondensed-Regular.ttf
+        - asset: assets/fonts/BarlowCondensed-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/BarlowCondensed-SemiBold.ttf
+          weight: 600

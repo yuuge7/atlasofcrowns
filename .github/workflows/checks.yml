@@ -1,0 +1,39 @@
+name: Checks
+
+# Analysis and the full test suite on every pull request. Pushes to main run
+# the same two steps as part of the release workflow.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.x
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test

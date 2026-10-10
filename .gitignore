@@ -1,0 +1,62 @@
+# ---------------------------------------------------------------- signing
+# The release keystore and its passwords live in the project root on the
+# maintainer's machine only. Losing them means no update can ever be
+# installed over an existing release; committing them means anyone can sign
+# as us. See "Release signing" in README.md.
+*.jks
+*.keystore
+*.p12
+key.properties
+
+*.md
+!README.md
+
+# ---------------------------------------------------------------- Flutter / Dart
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+**/doc/api/
+migrate_working_dir/
+.widget_preview/
+
+# Symbolication and obfuscation maps
+app.*.symbols
+app.*.map.json
+
+# ---------------------------------------------------------------- Android
+# android/.gitignore covers Gradle caches, local.properties and the wrapper.
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# ---------------------------------------------------------------- map pipeline
+# Downloads and intermediates; tool/map/build_map.mjs rebuilds them.
+/tool/map/node_modules/
+/tool/map/raw/
+/tool/map/out/
+
+# ---------------------------------------------------------------- editors and OS
+*.iml
+*.ipr
+*.iws
+.idea/
+.atom/
+.history
+.svn/
+.swiftpm/
+.build/
+.buildlog/
+# .vscode/ is left trackable on purpose: shared launch configurations go there.
+
+*.class
+*.log
+*.pyc
+__pycache__/
+*.swp
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini

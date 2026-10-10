@@ -1,0 +1,154 @@
+import 'package:flutter/material.dart';
+
+import '../theme.dart';
+
+/// A value under a small spaced-capitals label.
+class Stat extends StatelessWidget {
+  const Stat(this.label, this.value, {super.key, this.detail, this.detailColor});
+
+  final String label;
+  final String value;
+
+  /// Smaller text right after the value, e.g. "+41".
+  final String? detail;
+  final Color? detailColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label.toUpperCase(), style: AtlasText.label),
+        const SizedBox(height: 2),
+        Text.rich(
+          TextSpan(text: value, children: [
+            if (detail != null) TextSpan(text: '  $detail', style: AtlasText.figure.copyWith(fontSize: 14, color: detailColor ?? AtlasColors.ivoryDim)),
+          ]),
+          style: AtlasText.figure,
+          maxLines: 1,
+        ),
+      ],
+    );
+  }
+}
+
+/// The colour a nation has on the map, as a small enamel plate.
+class NationSwatch extends StatelessWidget {
+  const NationSwatch(this.color, {super.key, this.width = 10, this.height = 34});
+
+  final Color color;
+  final double width;
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2), border: Border.all(color: AtlasColors.ink)),
+    );
+  }
+}
+
+/// A HUD surface: baize with a brass rule along one edge.
+class Panel extends StatelessWidget {
+  const Panel({super.key, required this.child, this.ruleOnTop = false, this.padding = const EdgeInsets.fromLTRB(16, 12, 16, 12)});
+
+  final Widget child;
+  final bool ruleOnTop;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    const rule = BorderSide(color: AtlasColors.brass, width: 1.5);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: AtlasColors.baize,
+        border: Border(top: ruleOnTop ? rule : BorderSide.none, bottom: ruleOnTop ? BorderSide.none : rule),
+        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 10)],
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+}
+
+/// Picks a number of units between 1 and [max].
+class AmountPicker extends StatefulWidget {
+  const AmountPicker({super.key, required this.max, required this.confirmLabel, required this.onConfirm, required this.onCancel, this.initial, this.verdict});
+
+  final int max;
+  final int? initial;
+
+  /// A line about the amount picked, e.g. the odds of an attack.
+  final String Function(int amount)? verdict;
+
+  /// Text of the confirm button for a given amount, e.g. "Send 12".
+  final String Function(int amount) confirmLabel;
+  final ValueChanged<int> onConfirm;
+  final VoidCallback onCancel;
+
+  @override
+  State<AmountPicker> createState() => _AmountPickerState();
+}
+
+class _AmountPickerState extends State<AmountPicker> {
+  late int _amount = (widget.initial ?? widget.max).clamp(1, widget.max);
+
+  @override
+  void didUpdateWidget(AmountPicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _amount = _amount.clamp(1, widget.max);
+  }
+
+  void _set(int value) => setState(() => _amount = value.clamp(1, widget.max));
+
+  @override
+  Widget build(BuildContext context) {
+    final max = widget.max;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(children: [
+          IconButton(onPressed: _amount > 1 ? () => _set(_amount - 1) : null, icon: const Icon(Icons.remove), tooltip: 'One fewer'),
+          Expanded(
+            child: Slider(
+              value: _amount.toDouble(),
+              min: 1,
+              max: max > 1 ? max.toDouble() : 2,
+              divisions: max > 1 ? max - 1 : 1,
+              onChanged: max > 1 ? (v) => _set(v.round()) : null,
+            ),
+          ),
+          IconButton(onPressed: _amount < max ? () => _set(_amount + 1) : null, icon: const Icon(Icons.add), tooltip: 'One more'),
+        ]),
+        Row(children: [
+          for (final (label, value) in [('1', 1), ('Half', (max + 1) ~/ 2), ('All', max)])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TextButton(
+                onPressed: () => _set(value),
+                style: TextButton.styleFrom(
+                  minimumSize: const Size(52, 40),
+                  backgroundColor: _amount == value ? AtlasColors.baizeLight : null,
+                ),
+                child: Text(label.toUpperCase()),
+              ),
+            ),
+        ]),
+        if (widget.verdict != null)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, top: 6),
+            child: Text(widget.verdict!(_amount), style: AtlasText.body),
+          ),
+        const SizedBox(height: 10),
+        Row(children: [
+          OutlinedButton(onPressed: widget.onCancel, child: const Text('CANCEL')),
+          const SizedBox(width: 12),
+          Expanded(child: FilledButton(onPressed: () => widget.onConfirm(_amount), child: Text(widget.confirmLabel(_amount).toUpperCase()))),
+        ]),
+      ],
+    );
+  }
+}

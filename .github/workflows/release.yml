@@ -1,0 +1,120 @@
+name: Release
+
+# Every push to main is tested, built, signed and published as a new GitHub
+# release named "Atlas of Crowns v<major>.<n>", with the APK attached.
+#
+# Versions never repeat. <major> is the first number of `version:` in
+# pubspec.yaml and is the only part set by hand; <n> is one more than the
+# highest existing v<major>.<n> tag (tool/ci/next_version.sh). The build gets
+# that version as its Android versionName and a versionCode that always
+# grows, so every release installs over the one before it. Publishing fails
+# rather than touch a release that already exists.
+#
+# Needs two repository secrets, described under "Release signing" in
+# README.md: KEYSTORE_BASE64 and KEYSTORE_PASSWORD.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write # create the tag and the release
+
+# One release at a time, so two pushes can never work out the same version.
+# A push that arrives while another is waiting replaces the waiting one; its
+# commits are in the release that follows.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash # with pipefail, so a failing command in a pipe fails the step
+
+env:
+  APP_NAME: Atlas of Crowns
+  ARTIFACT: AtlasOfCrowns
+  KEYSTORE_FILE: atlasofcrowns-release.jks
+  KEY_ALIAS: atlasofcrowns
+  # SHA-256 fingerprint of the release certificate. It is public (every APK
+  # carries it) and is checked before building, so a wrong or replaced
+  # keystore secret can never produce a release that fails to update.
+  CERT_SHA256: 9A:DA:F7:E2:C2:28:13:83:64:6B:E9:5E:4E:D8:D4:58:84:E1:8C:F0:2F:31:1B:21:44:0B:30:1E:D1:66:49:22
+
+jobs:
+  release:
+    name: Test, build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Restore the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::The secrets KEYSTORE_BASE64 and KEYSTORE_PASSWORD are not set. See 'Release signing' in README.md."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode --ignore-garbage > "$KEYSTORE_FILE"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyPassword=%s\nkeyAlias=%s\n' \
+            "$KEYSTORE_FILE" "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" "$KEY_ALIAS" > key.properties
+          actual=$(keytool -list -v -keystore "$KEYSTORE_FILE" -alias "$KEY_ALIAS" -storepass:env KEYSTORE_PASSWORD \
+            | sed -n 's/^[[:space:]]*SHA256: //p')
+          if [ "$actual" != "$CERT_SHA256" ]; then
+            echo "::error::The keystore in KEYSTORE_BASE64 is not the release key (certificate $actual). Nothing was built."
+            exit 1
+          fi
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.x
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Work out the next version
+        id: version
+        run: |
+          git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' \
+            | bash tool/ci/next_version.sh pubspec.yaml | tee -a "$GITHUB_OUTPUT"
+
+      - name: Build the APK
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          flutter build apk --release --build-name="$VERSION_NAME" --build-number="$VERSION_CODE"
+          cp build/app/outputs/flutter-apk/app-release.apk "$ARTIFACT-$TAG.apk"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # `gh release create` refuses a tag that already has a release, so
+          # an existing release is never overwritten.
+          gh release create "$TAG" "$ARTIFACT-$TAG.apk" \
+            --target "$GITHUB_SHA" \
+            --title "$APP_NAME $TAG" \
+            --generate-notes
+          echo "Published **$APP_NAME $TAG** (versionCode ${{ steps.version.outputs.code }})." >> "$GITHUB_STEP_SUMMARY"

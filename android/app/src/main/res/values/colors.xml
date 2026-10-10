@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same greens as AtlasColors in lib/theme.dart. -->
+    <color name="atlas_baize">#1F3D36</color>
+    <!-- The launch window matches the first Flutter frame. -->
+    <color name="atlas_baize_deep">#142924</color>
+</resources>

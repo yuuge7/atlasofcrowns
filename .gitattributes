@@ -1,0 +1,11 @@
+# Text files are stored with LF and checked out in the platform's style,
+# except scripts that run on Linux CI and must never get CRLF.
+* text=auto
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.bat text eol=crlf
+
+*.png binary
+*.ttf binary
+*.jks binary
