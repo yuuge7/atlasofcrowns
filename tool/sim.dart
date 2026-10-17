@@ -18,9 +18,10 @@ void main(List<String> args) {
   final every = args.length > 3 ? int.parse(args[3]) : 25;
   final scenario = args.length > 4 ? args[4] : '1914';
 
+  final scenarioJson = jsonDecode(File('assets/scenarios/$scenario.json').readAsStringSync()) as Map<String, dynamic>;
   final world = World.fromJson(
-    jsonDecode(File('assets/map/europe.json').readAsStringSync()) as Map<String, dynamic>,
-    jsonDecode(File('assets/scenarios/$scenario.json').readAsStringSync()) as Map<String, dynamic>,
+    jsonDecode(File('assets/map/${scenarioJson['map'] ?? 'europe'}.json').readAsStringSync()) as Map<String, dynamic>,
+    scenarioJson,
   );
   final game = Game.start(world, human: -1, seed: seed, winFraction: winFraction, randomEvents: args.length > 5 ? args[5] == 'events' : true);
   final tally = <EventKind, int>{};
@@ -38,7 +39,7 @@ void main(List<String> args) {
     final s = game.state;
     final forts = s.forts.fold(0, (a, b) => a + b);
     final developed = s.development.fold(0, (a, b) => a + b);
-    stdout.writeln('${world.dateLabel(s.turn).padRight(9)} alive ${ranked.length.toString().padLeft(2)} wars ${s.wars.length.toString().padLeft(2)} '
+    stdout.writeln('${game.dateLabel(s.turn).padRight(9)} alive ${ranked.length.toString().padLeft(2)} wars ${s.wars.length.toString().padLeft(2)} '
         'allies ${s.alliances.length.toString().padLeft(2)} pacts ${s.pacts.length.toString().padLeft(2)} forts ${forts.toString().padLeft(3)} dev ${developed.toString().padLeft(4)} | $top');
   }
 
@@ -49,7 +50,7 @@ void main(List<String> args) {
       tally[e.kind] = (tally[e.kind] ?? 0) + 1;
       if (e.kind == EventKind.captured) lastCapture = game.state.turn;
       if (e.kind == EventKind.eliminated) {
-        stdout.writeln('  ${world.dateLabel(report.turn)}: ${world.nations[e.a].name} falls to ${e.b >= 0 ? world.nations[e.b].name : '?'}');
+        stdout.writeln('  ${game.dateLabel(report.turn)}: ${world.nations[e.a].name} falls to ${e.b >= 0 ? world.nations[e.b].name : '?'}');
       }
     }
     if (game.state.turn - lastCapture > longestQuiet) longestQuiet = game.state.turn - lastCapture;

@@ -69,7 +69,18 @@ Color _hex(String hex) => Color(0xFF000000 | int.parse(hex.replaceFirst('#', '')
 ///   the middle;
 /// - `border:field,border`: a plain field in a border;
 /// - `triangle:c1,...,cn,hoist`: horizontal stripes with a triangle at the
-///   hoist.
+///   hoist;
+/// - `canton:canton,stars,c1,...,cn`: horizontal stripes with a canton
+///   strewn with stars, like the Stars and Stripes;
+/// - `hoist:band,star,c1,...,cn`: horizontal stripes with a band at the
+///   hoist bearing a star, like Texas;
+/// - `pale:side,middle,emblem`: a wide middle stripe between two narrow
+///   ones, with a lozenge in the middle, like Canada;
+/// - `saltire:field,cross`: a diagonal cross;
+/// - `quarters:c1,c2,c3,c4`: four quarters, left to right and top down;
+/// - `crossq:cross,c1,c2,c3,c4`: four quarters parted by a centred cross;
+/// - `bend:field,band,edge`: a diagonal band with edges, hoist top to fly
+///   bottom.
 ///
 /// Anything else is a plain field of [fallback].
 void paintFlag(Canvas canvas, Rect box, String spec, Color fallback) {
@@ -168,6 +179,84 @@ void paintFlag(Canvas canvas, Rect box, String spec, Color fallback) {
           ..close(),
         paint..color = colors.last,
       );
+    case 'canton' when colors.length >= 3:
+      final stripes = colors.sublist(2);
+      final band = box.height / stripes.length;
+      for (var i = 0; i < stripes.length; i++) {
+        fill(Rect.fromLTWH(box.left, box.top + band * i, box.width, band + 0.5), stripes[i]);
+      }
+      // Down to the middle stripe of a striped flag, over the top two of a
+      // barred one.
+      final depth = stripes.length > 4 ? band * ((stripes.length + 1) ~/ 2) : band * math.min(2, stripes.length);
+      final canton = Rect.fromLTWH(box.left, box.top, box.width * 0.4, depth);
+      fill(canton, colors[0]);
+      final star = Paint()..color = colors[1];
+      for (var row = 0; row < 3; row++) {
+        for (var col = 0; col < 4; col++) {
+          final c = Offset(canton.left + canton.width * (col + 0.5 + (row.isOdd ? 0.25 : 0) - 0.125) / 4, canton.top + canton.height * (row + 0.5) / 3);
+          canvas.drawCircle(c, canton.height * 0.07, star);
+        }
+      }
+    case 'hoist' when colors.length >= 3:
+      final stripes = colors.sublist(2);
+      final band = box.height / stripes.length;
+      for (var i = 0; i < stripes.length; i++) {
+        fill(Rect.fromLTWH(box.left, box.top + band * i, box.width, band + 0.5), stripes[i]);
+      }
+      final hoist = Rect.fromLTWH(box.left, box.top, box.width / 3, box.height);
+      fill(hoist, colors[0]);
+      canvas.drawPath(_star(hoist.center, hoist.width * 0.32), paint..color = colors[1]);
+    case 'pale' when colors.length == 3:
+      fill(box, colors[1]);
+      fill(Rect.fromLTWH(box.left, box.top, box.width / 4, box.height), colors[0]);
+      fill(Rect.fromLTWH(box.right - box.width / 4, box.top, box.width / 4, box.height), colors[0]);
+      final c = box.center;
+      final w = box.height * 0.28;
+      canvas.drawPath(
+        Path()
+          ..moveTo(c.dx, c.dy - w)
+          ..lineTo(c.dx + w * 0.8, c.dy)
+          ..lineTo(c.dx, c.dy + w)
+          ..lineTo(c.dx - w * 0.8, c.dy)
+          ..close(),
+        paint..color = colors[2],
+      );
+    case 'saltire' when colors.length == 2:
+      fill(box, colors[0]);
+      final arm = Paint()
+        ..strokeWidth = box.height * 0.2
+        ..color = colors[1];
+      canvas.drawLine(box.topLeft, box.bottomRight, arm);
+      canvas.drawLine(box.bottomLeft, box.topRight, arm);
+    case 'quarters' when colors.length == 4:
+      final w = box.width / 2;
+      final h = box.height / 2;
+      for (var i = 0; i < 4; i++) {
+        fill(Rect.fromLTWH(box.left + w * (i % 2), box.top + h * (i ~/ 2), w + 0.5, h + 0.5), colors[i]);
+      }
+    case 'crossq' when colors.length == 5:
+      final w = box.width / 2;
+      final h = box.height / 2;
+      for (var i = 0; i < 4; i++) {
+        fill(Rect.fromLTWH(box.left + w * (i % 2), box.top + h * (i ~/ 2), w + 0.5, h + 0.5), colors[i + 1]);
+      }
+      final arm = box.height * 0.18;
+      fill(Rect.fromCenter(center: box.center, width: arm, height: box.height), colors[0]);
+      fill(Rect.fromCenter(center: box.center, width: box.width, height: arm), colors[0]);
+    case 'bend' when colors.length == 3:
+      fill(box, colors[0]);
+      canvas.drawLine(
+          box.topLeft,
+          box.bottomRight,
+          Paint()
+            ..strokeWidth = box.height * 0.42
+            ..color = colors[2]);
+      canvas.drawLine(
+          box.topLeft,
+          box.bottomRight,
+          Paint()
+            ..strokeWidth = box.height * 0.3
+            ..color = colors[1]);
     default:
       fill(box, colors.isEmpty ? fallback : colors.first);
   }

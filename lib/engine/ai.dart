@@ -81,6 +81,11 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final nationCount = w.nations.length;
   final view = outlook ?? Outlook(g);
   final power = view.power;
+  // How readily this nation goes to war, keeps its alliances and makes new
+  // ones: see [Rules.aiContentTemper].
+  // The player's own nation, when the AI stands in for them, plays without
+  // the scenario's temper: that belongs to the nations the AI runs.
+  final temper = me == s.human ? 1.0 : w.nations[me].aggression;
 
   bool hostile(int p) => s.wars.contains(pairKey(me, s.owner[p]));
 
@@ -180,7 +185,8 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   bool prey(int c) => neighborhood[me].contains(c) && power[me] > Rules.aiWarRatio * (power[c] + 1);
   // A partner is worth having when something worries us both, or, when it
   // [asked], when it is a friend. Never one at war with an ally, never one
-  // disliked, and never prey.
+  // disliked, and never prey. A peaceful nation stays neutral: it allies
+  // only with a friend who asks.
   bool worthAllying(int c, {bool asked = false}) {
     for (final a in allies) {
       if (g.atWar(a, c)) return false;
@@ -188,6 +194,7 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
     final liking = s.relation(me, c);
     if (prey(c) || liking < Rules.aiAllyRelation) return false;
     if (asked && liking >= Rules.aiFriendRelation) return true;
+    if (temper <= Rules.aiPeacefulTemper) return false;
     for (final t in worriers) {
       if (t != c && worries(t, c)) return true;
     }
@@ -212,10 +219,11 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
     if (partner >= 0) orders.offerAlliance.add(partner);
   }
   // An alliance that no longer guards against anything does not outlast a
-  // long peace: sooner or later the restless side lets it go.
+  // long peace: sooner or later the restless side lets it go. A content
+  // nation keeps its word.
   final restless = s.turn - s.lastWar[me];
   for (final a in allies) {
-    if (enemies.isEmpty && restless >= 12 && !worthAllying(a) && rng.chance(0.1)) orders.breakAlliance.add(a);
+    if (temper >= Rules.aiContentTemper && enemies.isEmpty && restless >= 12 && !worthAllying(a) && rng.chance(0.1)) orders.breakAlliance.add(a);
   }
 
   // ------------------------------------------------------------ pacts
@@ -236,6 +244,30 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
     if (partner >= 0) orders.offerPact.add(partner);
   }
 
+  // ------------------------------------------------------------ guarantees
+  // The AI gives none of its own (the scenarios and history do), but drops
+  // a guarantee of a nation it has come to dislike.
+  for (final key in s.guarantees.toList()..sort()) {
+    if (key >> 8 == me && s.relation(me, key & 0xFF) < Rules.aiAllyRelation) orders.revokeGuarantee.add(key & 0xFF);
+  }
+
+  // ------------------------------------------------------------ calls to arms
+  // At war with a stronger enemy, call the allies in. Answer an ally's call
+  // when it is liked, the two together outweigh the enemy, and no other war
+  // is on: a peaceful nation answers none.
+  for (final e in enemies) {
+    if (power[e] > power[me] && !g.hasArmsCall(me, e) && g.canCallToArms(me, e)) orders.callToArms.add(e);
+  }
+  if (temper > Rules.aiPeacefulTemper && enemies.length <= 1) {
+    for (final key in s.armsCalls.keys.toList()..sort()) {
+      final (caller, enemy) = pairOf(key);
+      if (!allies.contains(caller) || !g.canDeclareWar(me, enemy) || s.relation(me, caller) < Rules.aiArmsCallRelation) continue;
+      if (power[me] + power[caller] <= power[enemy]) continue;
+      orders.declareWar.add(enemy);
+      break;
+    }
+  }
+
   // ------------------------------------------------------------ war
   var facing = 0;
   var fronts = 0;
@@ -244,12 +276,16 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
     facing += power[e];
     fronts++;
   }
-  if (power[me] > 1.6 * facing) {
+  // A peaceful nation starts no war of its own.
+  if (temper > Rules.aiPeacefulTemper && power[me] > 1.6 * facing) {
     // The longer the peace, the worse the odds it will go to war on.
     var victim = -1;
     var bestOdds = Rules.aiWarRatio * (1 - math.min(Rules.aiRestlessMax, restless * Rules.aiRestlessPerTurn));
     for (final n in neighbors.toList()..sort()) {
       if (!g.canDeclareWar(me, n)) continue;
+      // The difficulty decides how soon and how readily the AI picks on the
+      // player.
+      if (n == s.human && s.turn < Rules.aiSparePlayerTurns[s.difficulty]) continue;
       // A neighbor already fighting others is an easier meal, above all one
       // fighting my allies. Its own allies come to its aid, at full weight
       // when they can reach me.
@@ -266,13 +302,14 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
       }
       // Friends are spared, and old enemies sought out.
       final grudge = 1 - s.relation(me, n) / (4 * Rules.maxRelation);
-      final odds = power[me] / (defence + 1) * (1 + 0.2 * math.min(distracted, 2)) * (withAllies ? 1.3 : 1) / (1 + 0.5 * fronts) * grudge * rng.range(0.9, 1.1);
+      final spare = n == s.human ? Rules.aiPlayerTarget[s.difficulty] : 1.0;
+      final odds = power[me] / (defence + 1) * (1 + 0.2 * math.min(distracted, 2)) * (withAllies ? 1.3 : 1) / (1 + 0.5 * fronts) * grudge * spare * rng.range(0.9, 1.1);
       if (odds > bestOdds) {
         bestOdds = odds;
         victim = n;
       }
     }
-    final eagerness = (enemies.isEmpty ? math.min(0.5, 0.12 + restless * 0.01) : 0.04) * w.aggression;
+    final eagerness = (enemies.isEmpty ? math.min(0.5, 0.12 + restless * 0.01) : 0.04) * w.aggression * temper;
     if (victim >= 0 && rng.chance(eagerness)) orders.declareWar.add(victim);
   }
 
@@ -284,6 +321,17 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
       if (s.owner[q] != me && hostile(q)) targets.add(q);
     }
   }
+  // Unclaimed land within reach is there for the taking, war or no war,
+  // though a war comes first.
+  final unclaimed = <int>{};
+  if (w.wild >= 0 && s.alive[w.wild]) {
+    for (final p in mine) {
+      for (final q in [...w.provinces[p].links, ...w.landings[p]]) {
+        if (s.owner[q] == w.wild) unclaimed.add(q);
+      }
+    }
+  }
+  targets.addAll(unclaimed);
   final plans = <_Target>[];
   for (final t in targets.toList()..sort()) {
     final overland = [
@@ -295,10 +343,23 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
         if (s.owner[q] == me) q,
     };
     final need = (g.defenseStrength(t) * Rules.aiAttackMargin / g.armyFactor(me)).ceil() + 1;
-    final value = g.fullIncome(t) * 2.0 + (g.isCapital(t) ? 12 : 0) + overland.length * 1.5 + bySea.length * 0.5 + rng.nextDouble();
+    var value = g.fullIncome(t) * 2.0 + (g.isCapital(t) ? 12 : 0) + overland.length * 1.5 + bySea.length * 0.5 + rng.nextDouble();
+    if (unclaimed.contains(t)) value *= enemies.isEmpty ? 0.5 : 0.25;
     plans.add(_Target(t, need, value / (need + 3), [...overland, ...bySea.toList()..sort()], bySea));
   }
   plans.sort((a, b) => b.score.compareTo(a.score));
+  // Settling is slow: one unclaimed province at a time, and none while the
+  // last one is still being settled.
+  var settling = false;
+  for (final p in mine) {
+    if (w.startOwners[p] == w.wild && s.turn - s.heldSince[p] < Rules.aiSettleTurns) settling = true;
+  }
+  plans.removeWhere((plan) {
+    if (!unclaimed.contains(plan.province)) return false;
+    if (settling) return true;
+    settling = true;
+    return false;
+  });
   for (final plan in plans) {
     // Leave half of what the other enemy neighbors could throw at a source.
     int spare(int p) {
@@ -332,8 +393,15 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   // softest enemy province until it is. Without this, two equal powers would
   // line their borders evenly and never move again.
   var staging = -1;
-  if (plans.isNotEmpty && orders.moves.isEmpty) {
-    final softest = plans.reduce((a, b) => a.need < b.need || (a.need == b.need && a.province < b.province) ? a : b);
+  // At war, only against the enemy.
+  final aims = enemies.isEmpty
+      ? plans
+      : [
+          for (final plan in plans)
+            if (!unclaimed.contains(plan.province)) plan
+        ];
+  if (aims.isNotEmpty && orders.moves.isEmpty) {
+    final softest = aims.reduce((a, b) => a.need < b.need || (a.need == b.need && a.province < b.province) ? a : b);
     for (final p in softest.sources) {
       if (staging < 0 || free[p]! > free[staging]!) staging = p;
     }

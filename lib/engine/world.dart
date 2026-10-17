@@ -56,6 +56,8 @@ class Nation {
     this.readiness = 1,
     this.tech = const [0, 0],
     this.flag = '',
+    this.wild = false,
+    this.aggression = 1,
   });
 
   final int id;
@@ -76,6 +78,15 @@ class Nation {
   /// Starting level in each research field, by field index.
   final List<int> tech;
 
+  /// Not a nation but the land nobody rules yet: it never plays, deals or
+  /// counts among the powers, and anyone may march in and take it.
+  final bool wild;
+
+  /// How readily the AI takes this nation to war, against the scenario's
+  /// own [World.aggression]: below 1 for a nation content with what it has,
+  /// above for a hungry one.
+  final double aggression;
+
   /// How the flag is drawn, e.g. `h:#000000,#FFFFFF,#DD0000` for three
   /// stripes (the UI reads it).
   final String flag;
@@ -84,11 +95,27 @@ class Nation {
 /// Something that happened in history on a given turn, replayed when the
 /// game still looks enough like history for it to make sense.
 class HistoryEvent {
-  const HistoryEvent({required this.turn, required this.text, this.alliances = const [], this.wars = const []});
+  const HistoryEvent({
+    required this.turn,
+    required this.text,
+    this.alliances = const [],
+    this.breaks = const [],
+    this.guarantees = const [],
+    this.pacts = const [],
+    this.wars = const [],
+  });
 
   factory HistoryEvent.fromJson(Map<String, dynamic> j) {
     List<(int, int)> pairs(String key) => [for (final p in j[key] as List? ?? const []) ((p as List)[0] as int, p[1] as int)];
-    return HistoryEvent(turn: j['turn'] as int, text: j['text'] as String, alliances: pairs('alliances'), wars: pairs('wars'));
+    return HistoryEvent(
+      turn: j['turn'] as int,
+      text: j['text'] as String,
+      alliances: pairs('alliances'),
+      breaks: pairs('breaks'),
+      guarantees: pairs('guarantees'),
+      pacts: pairs('pacts'),
+      wars: pairs('wars'),
+    );
   }
 
   final int turn;
@@ -99,12 +126,22 @@ class HistoryEvent {
   /// Alliances signed, before any of the [wars] are declared.
   final List<(int, int)> alliances;
 
+  /// Alliances that come apart.
+  final List<(int, int)> breaks;
+
+  /// Independence guaranteed, (guarantor, guaranteed).
+  final List<(int, int)> guarantees;
+
+  /// Non-aggression pacts signed.
+  final List<(int, int)> pacts;
+
   /// Wars declared, (attacker, attacked).
   final List<(int, int)> wars;
 }
 
 class World {
   World({
+    this.mapName = 'europe',
     required this.mapBuild,
     required this.scenarioId,
     required this.scenarioName,
@@ -115,11 +152,14 @@ class World {
     required this.startOwners,
     required this.startWars,
     this.startAlliances = const [],
+    this.startGuarantees = const [],
+    this.startPacts = const [],
     this.aggression = 1,
     this.history = const [],
     this.seas = const [],
     List<int>? startForts,
-  }) : startForts = startForts ?? List.filled(provinces.length, 0);
+  })  : startForts = startForts ?? List.filled(provinces.length, 0),
+        wild = nations.indexWhere((n) => n.wild);
 
   /// Builds the world from the decoded `assets/map/*.json` and
   /// `assets/scenarios/*.json`. Only the fields the rules need are read; the
@@ -158,9 +198,12 @@ class World {
           readiness: (rawNations[i]['readiness'] as num? ?? 1).toDouble(),
           tech: (rawNations[i]['tech'] as List?)?.cast<int>() ?? const [0, 0],
           flag: rawNations[i]['flag'] as String? ?? '',
+          wild: rawNations[i]['wild'] as bool? ?? false,
+          aggression: (rawNations[i]['aggression'] as num? ?? 1).toDouble(),
         ),
     ];
     return World(
+      mapName: scenario['map'] as String? ?? 'europe',
       mapBuild: map['build'] as String,
       scenarioId: scenario['id'] as String,
       scenarioName: scenario['name'] as String,
@@ -176,10 +219,14 @@ class World {
       startOwners: (scenario['owners'] as List).cast<int>(),
       startWars: [for (final w in scenario['wars'] as List) (w as List).cast<int>()],
       startAlliances: [for (final a in scenario['alliances'] as List? ?? const []) (a as List).cast<int>()],
+      startGuarantees: [for (final a in scenario['guarantees'] as List? ?? const []) (a as List).cast<int>()],
+      startPacts: [for (final a in scenario['pacts'] as List? ?? const []) (a as List).cast<int>()],
       startForts: (scenario['forts'] as List?)?.cast<int>(),
     );
   }
 
+  /// The map file the scenario is played on, `assets/map/<mapName>.json`.
+  final String mapName;
   final String mapBuild;
   final String scenarioId;
   final String scenarioName;
@@ -220,18 +267,33 @@ class World {
   bool reaches(int from, int to) => provinces[from].links.contains(to) || landings[from].contains(to);
   final List<Province> provinces;
   final List<Nation> nations;
+
+  /// Index of the unclaimed land among [nations], or -1 when every
+  /// province has a ruler.
+  final int wild;
+
+  /// Whether [n] is the unclaimed land.
+  bool isWild(int n) => n >= 0 && n == wild;
+
   final List<int> startOwners;
   final List<List<int>> startWars;
   final List<List<int>> startAlliances;
+
+  /// (guarantor, guaranteed) when the scenario opens.
+  final List<List<int>> startGuarantees;
+
+  /// Non-aggression pacts in force when the scenario opens, each for a
+  /// full [Rules.pactTurns].
+  final List<List<int>> startPacts;
 
   /// Fort level of each province when the scenario opens.
   final List<int> startForts;
 
   static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  /// One turn is one month.
-  String dateLabel(int turn) {
-    final months = startMonth - 1 + turn;
+  /// The date of [turn], when each turn stands for [monthsPerTurn] months.
+  String dateLabel(int turn, [int monthsPerTurn = 1]) {
+    final months = startMonth - 1 + turn * monthsPerTurn;
     return '${_months[months % 12]} ${startYear + months ~/ 12}';
   }
 }

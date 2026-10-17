@@ -38,6 +38,9 @@ abstract final class AtlasColors {
   /// Diplomacy map: a non-aggression pact.
   static const mapPact = Color(0xFFB9C79A);
 
+  /// Land nobody rules yet: blank paper on every map mode.
+  static const mapWild = Color(0xFFF2EDDF);
+
   /// Relations map: the friendly end of the scale; the hostile end is
   /// [mapEnemy], indifference [mapNeutral].
   static const mapFriend = Color(0xFF5F9C6A);

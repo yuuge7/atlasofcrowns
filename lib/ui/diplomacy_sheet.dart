@@ -172,10 +172,49 @@ class _DiplomacySheet extends StatelessWidget {
             note: pactSaid ?? pactNote,
             child: c.game.canOfferPact(c.human, nation) || c.orders.offerPact.contains(nation) ? pactButton : null,
           ),
+          _Section(
+            title: 'Guarantee of independence',
+            note: _guaranteeNote(c, nation),
+            child: c.game.guarantees(c.human, nation)
+                ? (c.orders.revokeGuarantee.contains(nation)
+                    ? OutlinedButton(onPressed: () => c.setGuaranteeRevoked(nation, false), child: const Text('KEEP THE GUARANTEE'))
+                    : OutlinedButton(onPressed: () => c.setGuaranteeRevoked(nation, true), child: const Text('WITHDRAW THE GUARANTEE')))
+                : c.orders.guarantee.contains(nation)
+                    ? OutlinedButton(onPressed: () => c.setGuarantee(nation, false), child: const Text('CALL IT OFF'))
+                    : c.game.canGuarantee(c.human, nation)
+                        ? FilledButton(onPressed: () => c.setGuarantee(nation, true), child: Text('GUARANTEE ${n.shortName.toUpperCase()}'))
+                        : null,
+          ),
         ],
       ),
     );
   }
+}
+
+/// What the guarantee section says: who already guarantees [nation], and
+/// what the player's own guarantee does or would do.
+String _guaranteeNote(GameController c, int nation) {
+  final name = c.world.nations[nation].shortName;
+  final others = [
+    for (final g in c.game.guarantorsOf(nation))
+      if (g != c.human) c.world.nations[g].shortName,
+  ];
+  final already = others.isEmpty ? '' : ' Already guaranteed by ${others.length == 1 ? others.single : '${others.sublist(0, others.length - 1).join(', ')} and ${others.last}'}.';
+  if (c.game.guarantees(c.human, nation)) {
+    return c.orders.revokeGuarantee.contains(nation)
+        ? 'Your guarantee of $name ends at the end of the turn. Relations ${signed(Rules.brokenRelation)}.$already'
+        : 'You guarantee $name: whoever declares war on it is at war with you.$already';
+  }
+  if (c.orders.guarantee.contains(nation)) return 'Your guarantee of $name begins at the end of the turn.$already';
+  if (!c.game.canGuarantee(c.human, nation)) {
+    final why = c.game.atWar(c.human, nation)
+        ? 'Not while you are at war.'
+        : c.game.allied(c.human, nation)
+            ? 'Allies defend each other anyway.'
+            : 'Not while either of you is a vassal.';
+    return '$why$already';
+  }
+  return 'Promise to go to war with anyone who attacks $name. It does not bind $name to your wars. Relations ${signed(Rules.guaranteeRelation)}.$already';
 }
 
 class _Section extends StatelessWidget {

@@ -81,7 +81,7 @@ class SaveStore {
       'savedAt': DateTime.now().toIso8601String(),
       'nation': game.state.human,
       'turn': game.state.turn,
-      'date': game.world.dateLabel(game.state.turn),
+      'date': game.dateLabel(game.state.turn),
       'game': game.toJson(),
       'orders': orders.toJson(),
       'marches': marches,

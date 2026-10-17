@@ -24,6 +24,8 @@ class Game {
     int difficulty = Rules.normalDifficulty,
     bool fog = false,
     bool randomEvents = false,
+    int monthsPerTurn = 1,
+    bool endless = false,
   }) {
     final nations = world.nations.length;
     final state = GameState(
@@ -33,6 +35,7 @@ class Game {
       difficulty: difficulty,
       fog: fog,
       randomEvents: randomEvents,
+      monthsPerTurn: monthsPerTurn,
       owner: List.of(world.startOwners),
       units: List.filled(world.provinces.length, 0),
       gold: List.filled(nations, 0),
@@ -44,6 +47,7 @@ class Game {
       researchFocus: [for (final n in world.nations) n.tech[Field.army.index] <= n.tech[Field.industry.index] ? Field.army.index : Field.industry.index],
       researchShare: List.filled(nations, 10),
     );
+    state.sandbox = endless;
     for (final war in world.startWars) {
       state.openWar(war[0], war[1], 0);
       state.setRelation(war[0], war[1], Rules.warRelation);
@@ -51,6 +55,13 @@ class Game {
     for (final alliance in world.startAlliances) {
       state.alliances.add(pairKey(alliance[0], alliance[1]));
       state.setRelation(alliance[0], alliance[1], Rules.alliedRelation);
+    }
+    for (final pact in world.startPacts) {
+      state.pacts[pairKey(pact[0], pact[1])] = 1 + Rules.pactTurns;
+    }
+    for (final guarantee in world.startGuarantees) {
+      state.guarantees.add(directedKey(guarantee[0], guarantee[1]));
+      state.changeRelation(guarantee[0], guarantee[1], Rules.guaranteeRelation);
     }
     final game = Game(world, state);
     for (var n = 0; n < nations; n++) {
@@ -60,6 +71,8 @@ class Game {
         state.capital[n] = -1;
         continue;
       }
+      // Unclaimed land has no treasury and no army; its people defend it.
+      if (world.isWild(n)) continue;
       // Difficulty changes what the AI earns from here on, not the position
       // it starts from.
       final income = game.incomeOf(n, difficulty: false);
@@ -87,7 +100,7 @@ class Game {
       units[state.owner[p]] += state.units[p];
     }
     state.chronicle.add([
-      for (var n = 0; n < world.nations.length; n++) ...[held[n], units[n], state.alive[n] ? incomeOf(n) : 0],
+      for (var n = 0; n < world.nations.length; n++) ...[held[n], units[n], state.alive[n] && !world.isWild(n) ? incomeOf(n) : 0],
     ]);
     if (state.chronicle.length > Rules.chronicleSamples) {
       final kept = [for (var i = 0; i < state.chronicle.length; i += 2) state.chronicle[i]];
@@ -143,7 +156,7 @@ class Game {
   /// A vassal goes to war only with its overlord; an overlord does not war
   /// on its own vassal.
   bool canDeclareWar(int a, int b) {
-    if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
+    if (a == b || a < 0 || b < 0 || b >= world.nations.length || world.isWild(a) || world.isWild(b)) return false;
     if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
     if (state.overlord[a] >= 0 || state.overlord[b] == a || pactLeft(a, b) > 0) return false;
     return state.turn >= (state.truceUntil[pairKey(a, b)] ?? 0);
@@ -156,7 +169,7 @@ class Game {
   /// Whether [a] and [b] may sign a non-aggression pact, or renew one about
   /// to end: both standing and free, at peace and not allied.
   bool canOfferPact(int a, int b) {
-    if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
+    if (a == b || a < 0 || b < 0 || b >= world.nations.length || world.isWild(a) || world.isWild(b)) return false;
     if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
     if (state.overlord[a] >= 0 || state.overlord[b] >= 0) return false;
     return pactLeft(a, b) < Rules.pactRenewTurns;
@@ -166,7 +179,7 @@ class Game {
   bool hasPactOffer(int from, int to) => state.pactOffers.containsKey(directedKey(from, to));
 
   /// Whether [a] may send [b] an envoy or a gift: both standing, not at war.
-  bool canCourt(int a, int b) => a != b && a >= 0 && b >= 0 && b < world.nations.length && state.alive[a] && state.alive[b] && !atWar(a, b);
+  bool canCourt(int a, int b) => a != b && a >= 0 && b >= 0 && b < world.nations.length && !world.isWild(a) && !world.isWild(b) && state.alive[a] && state.alive[b] && !atWar(a, b);
 
   /// True when [from] offered [to] a pact in the last
   /// [Rules.aiAllianceRetryTurns] turns.
@@ -210,17 +223,43 @@ class Game {
 
   /// Allies of [b] who would join if [a] declared war on it now: those not
   /// already at war with [a], not allied to it as well and not bound by a
-  /// truce with it, and [b]'s overlord. [allies] is [alliesOf] of [b], when
-  /// already at hand. Vassals follow their overlord into every war anyway.
+  /// truce with it, and [b]'s overlord and guarantors. [allies] is
+  /// [alliesOf] of [b], when already at hand. Vassals follow their overlord
+  /// into every war anyway.
   List<int> wouldDefend(int a, int b, [List<int>? allies]) => [
-        for (final ally in {...allies ?? alliesOf(b), if (state.overlord[b] >= 0) state.overlord[b]})
-          if (canDeclareWar(ally, a)) ally,
+        for (final ally in {...allies ?? alliesOf(b), if (state.overlord[b] >= 0) state.overlord[b], ...guarantorsOf(b)})
+          if (ally != a && canDeclareWar(ally, a)) ally,
       ];
+
+  /// Whether [caller] may call its allies to arms against [enemy]: it is at
+  /// war with it, and some ally of it could still declare war on it.
+  bool canCallToArms(int caller, int enemy) => atWar(caller, enemy) && alliesOf(caller).any((a) => canDeclareWar(a, enemy));
+
+  /// Whether [caller]'s call to arms against [enemy] stands.
+  bool hasArmsCall(int caller, int enemy) => state.armsCalls.containsKey(directedKey(caller, enemy));
+
+  /// Whether [a] guarantees the independence of [b].
+  bool guarantees(int a, int b) => state.guarantees.contains(directedKey(a, b));
+
+  /// The nations guaranteeing [b]'s independence, in id order.
+  List<int> guarantorsOf(int b) => [
+        for (final key in state.guarantees.toList()..sort())
+          if (key & 0xFF == b) key >> 8,
+      ];
+
+  /// Whether [a] may guarantee the independence of [b]: both standing and
+  /// free, at peace, not allied (an ally defends it anyway) and not yet
+  /// guaranteed by [a].
+  bool canGuarantee(int a, int b) {
+    if (a == b || a < 0 || b < 0 || b >= world.nations.length || world.isWild(a) || world.isWild(b)) return false;
+    if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b) || guarantees(a, b)) return false;
+    return state.overlord[a] < 0 && state.overlord[b] < 0;
+  }
 
   /// Whether [a] and [b] may become allies: both standing, at peace and
   /// not yet allied, and neither at war with an ally of the other.
   bool canOfferAlliance(int a, int b) {
-    if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
+    if (a == b || a < 0 || b < 0 || b >= world.nations.length || world.isWild(a) || world.isWild(b)) return false;
     if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
     if (state.overlord[a] >= 0 || state.overlord[b] >= 0) return false;
     for (var other = 0; other < world.nations.length; other++) {
@@ -364,6 +403,8 @@ class Game {
   double revoltChance(int p) {
     if (!isOccupied(p)) return 0;
     final old = world.startOwners[p];
+    // Land taken from nobody has nobody to go back to.
+    if (world.isWild(old)) return 0;
     if (state.alive[old] && !atWar(old, state.owner[p])) return 0;
     final guard = militia(p);
     if (state.units[p] >= guard) return 0;
@@ -386,7 +427,14 @@ class Game {
   bool isCapital(int p) => state.capital[state.owner[p]] == p;
 
   /// Militia standing with the owner's units whenever [p] is attacked.
-  int militia(int p) => Rules.militiaBase + (provinceIncome(p) * Rules.militiaPerIncome).floor();
+  int militia(int p) {
+    final locals = Rules.militiaBase + (provinceIncome(p) * Rules.militiaPerIncome).floor();
+    return world.isWild(state.owner[p]) ? (locals * Rules.wildMilitia).round() : locals;
+  }
+
+  /// Whether armies of [a] and [b] fight where they meet: at war, or one of
+  /// them the unclaimed land, which anyone may take.
+  bool fighting(int a, int b) => atWar(a, b) || (a != b && (world.isWild(a) || world.isWild(b)));
 
   /// What a defender's strength in [p] is multiplied by.
   double defenseMultiplier(int p) => Rules.defenseBonus + state.forts[p] * Rules.fortBonus + (isCapital(p) ? Rules.capitalBonus : 0);
@@ -404,12 +452,15 @@ class Game {
   /// Provinces a nation must hold to win.
   int get winTarget => (state.winFraction * world.provinces.length).ceil();
 
+  /// The date of [turn] on this game's calendar.
+  String dateLabel(int turn) => world.dateLabel(turn, state.monthsPerTurn);
+
   /// Whether [n] may order units from [from] into [to] this turn, overland
   /// or by sea.
   bool canMove(int n, int from, int to) {
     if (state.owner[from] != n || !world.reaches(from, to)) return false;
     final target = state.owner[to];
-    return target == n || atWar(n, target);
+    return target == n || fighting(n, target);
   }
 
   // ------------------------------------------------------------ turn
@@ -422,7 +473,7 @@ class Game {
     final orders = List<Orders?>.filled(world.nations.length, null);
     final outlook = Outlook(this);
     for (var n = 0; n < orders.length; n++) {
-      if (!state.alive[n]) continue;
+      if (!state.alive[n] || world.isWild(n)) continue;
       orders[n] = n == state.human && !autoPlayHuman ? humanOrders : planAi(this, n, rng, outlook);
     }
     final report = resolveTurn(this, orders, rng);

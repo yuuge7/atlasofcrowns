@@ -784,6 +784,189 @@ void main() {
     });
   });
 
+  group('guarantees', () {
+    // 0 | 1 | 2 in a row, at peace; 2 guarantees 1.
+    final row = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1],
+      ],
+      owners: [0, 1, 2],
+      guarantees: [
+        [2, 1],
+      ],
+    );
+
+    test('bring the guarantor into a war declared on the guaranteed', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      expect(g.guarantorsOf(1), [2]);
+      expect(g.wouldDefend(0, 1), [2]);
+      final r = turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.atWar(0, 2), isTrue);
+      final call = r.events.singleWhere((e) => e.kind == EventKind.calledToArms);
+      expect((call.a, call.b, call.n1, call.flag), (2, 0, 1, true));
+    });
+
+    test('bind only the guarantor', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {0: Orders()..declareWar.add(2)});
+      expect(g.atWar(0, 2), isTrue);
+      expect(g.atWar(0, 1), isFalse);
+    });
+
+    test('are given and withdrawn by order, and end with a war between the two', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      final r = turn(g, {0: Orders()..guarantee.add(1)});
+      expect(has(r, EventKind.guaranteeGiven), isTrue);
+      expect(g.guarantorsOf(1), [0, 2]);
+      expect(g.canGuarantee(0, 1), isFalse, reason: 'given already');
+      turn(g, {0: Orders()..revokeGuarantee.add(1)});
+      expect(g.guarantorsOf(1), [2]);
+      turn(g, {2: Orders()..declareWar.add(1)});
+      expect(g.state.guarantees, isEmpty);
+    });
+
+    test('come from history, which may also part allies', () {
+      final scripted = tinyWorld(
+        links: [
+          [1],
+          [0, 2],
+          [1],
+        ],
+        owners: [0, 1, 2],
+        alliances: [
+          [0, 1],
+        ],
+        history: const [
+          HistoryEvent(turn: 1, text: 'Munich.', breaks: [(0, 1)], guarantees: [(2, 1)]),
+        ],
+      );
+      final g = gameWith(scripted, units: [5, 5, 5]);
+      turn(g, {});
+      turn(g, {});
+      expect(g.allied(0, 1), isFalse);
+      expect(g.guarantees(2, 1), isTrue);
+    });
+  });
+
+  group('calls to arms', () {
+    // The player 0 at war with 1; 2, allied to 0, borders 1 too.
+    final triangle = tinyWorld(
+      links: [
+        [1, 2],
+        [0, 2],
+        [0, 1],
+      ],
+      owners: [0, 1, 2],
+      wars: [
+        [0, 1],
+      ],
+      alliances: [
+        [0, 2],
+      ],
+    );
+
+    test('bring an ally that likes the caller into its war', () {
+      final g = Game.start(triangle, human: 0, seed: 2);
+      g.state.units.setAll(0, [5, 8, 8]);
+      expect(g.canCallToArms(0, 1), isTrue);
+      final r = g.endTurn(Orders()..callToArms.add(1));
+      expect(r.events.where((e) => e.kind == EventKind.armsCalled).single.a, 0);
+      expect(g.hasArmsCall(0, 1), isTrue);
+      g.endTurn(Orders());
+      expect(g.atWar(2, 1), isTrue);
+    });
+
+    test('are not answered by a disliked ally', () {
+      final g = Game.start(triangle, human: 0, seed: 2);
+      g.state.units.setAll(0, [5, 8, 8]);
+      g.state.setRelation(0, 2, 0);
+      g.endTurn(Orders()..callToArms.add(1));
+      g.endTurn(Orders());
+      expect(g.atWar(2, 1), isFalse);
+    });
+
+    test('lapse when the war ends', () {
+      final g = gameWith(triangle, units: [5, 8, 8]);
+      g.state.armsCalls[directedKey(0, 1)] = 99;
+      g.state.closeWar(0, 1, 0, Rules.truceTurns);
+      expect(g.state.armsCalls, isEmpty);
+    });
+  });
+
+  group('difficulty', () {
+    // A weak player 0 next to a strong AI 1.
+    final pair = tinyWorld(
+      links: [
+        [1],
+        [0],
+      ],
+      owners: [0, 1],
+      income: [1, 20],
+    );
+
+    int firstWar(int difficulty) {
+      final g = Game.start(pair, human: 0, seed: 4, difficulty: difficulty);
+      for (var i = 0; i < 60; i++) {
+        if (g.endTurn(Orders()).events.any((e) => e.kind == EventKind.warDeclared && e.b == 0)) return i;
+      }
+      return 60;
+    }
+
+    test('an easier game leaves the player alone for longer', () {
+      expect(firstWar(0), greaterThanOrEqualTo(Rules.aiSparePlayerTurns[0]));
+      expect(firstWar(1), greaterThanOrEqualTo(Rules.aiSparePlayerTurns[1]));
+      expect(firstWar(2), lessThan(Rules.aiSparePlayerTurns[0]));
+    });
+  });
+
+  group('temper', () {
+    // A strong 0 next to a weak 1.
+    World pair(double temper) => tinyWorld(
+          links: [
+            [1],
+            [0],
+          ],
+          owners: [0, 1],
+          income: [20, 1],
+          aggression: [temper, 1],
+        );
+
+    int wars(World world) {
+      final g = Game.start(world, human: -1, seed: 4);
+      var declared = 0;
+      for (var i = 0; i < 120; i++) {
+        declared += g.endTurn(null).events.where((e) => e.kind == EventKind.warDeclared && e.a == 0).length;
+      }
+      return declared;
+    }
+
+    test('a peaceful nation starts no war of its own', () {
+      expect(wars(pair(Rules.aiPeacefulTemper)), 0);
+      expect(wars(pair(1)), greaterThan(0));
+    });
+
+    test('pacts in force at the start hold the full term', () {
+      final g = Game.start(
+        tinyWorld(
+          links: [
+            [1],
+            [0],
+          ],
+          owners: [0, 1],
+          pacts: [
+            [0, 1],
+          ],
+        ),
+        human: -1,
+        seed: 1,
+      );
+      expect(g.pactLeft(0, 1), Rules.pactTurns + 1);
+      expect(g.canDeclareWar(0, 1), isFalse);
+    });
+  });
+
   group('happenings', () {
     test('never happen with random events off', () {
       final g = gameWith(line, units: [5, 5, 5, 5]);
@@ -839,6 +1022,107 @@ void main() {
       final next = g.researchCost(0, Field.values[g.state.researchFocus[0]]);
       turn(g, {0: Orders()..answer = 0});
       expect(g.state.research[0][g.state.researchFocus[0]], greaterThanOrEqualTo((next * inventorShare).floor()));
+    });
+  });
+
+  group('unclaimed land', () {
+    // 0 | wild | wild | 1, nation 2 the unclaimed land.
+    final frontier = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1, 3],
+        [2],
+      ],
+      owners: [0, 2, 2, 1],
+      wild: 2,
+    );
+
+    test('has no army, no treasury and no say', () {
+      final g = Game.start(frontier, human: -1, seed: 1);
+      expect(frontier.wild, 2);
+      expect(g.state.units[1] + g.state.units[2], 0);
+      expect(g.state.gold[2], 0);
+      expect(g.canDeclareWar(0, 2), isFalse);
+      expect(g.canOfferAlliance(0, 2), isFalse);
+      expect(g.canOfferPact(2, 0), isFalse);
+      expect(g.canCourt(0, 2), isFalse);
+      expect(g.canMove(0, 0, 1), isTrue, reason: 'anyone may march into unclaimed land');
+    });
+
+    test('is defended by its people, harder than a militia', () {
+      final g = gameWith(frontier, units: [6, 0, 0, 0]);
+      expect(g.militia(1), ((Rules.militiaBase + (g.provinceIncome(1) * Rules.militiaPerIncome).floor()) * Rules.wildMilitia).round());
+      final r = turn(g, {0: Orders()..moves.add(const MoveOrder(0, 1, 6))});
+      final battle = r.events.singleWhere((e) => e.kind == EventKind.battle);
+      expect(battle.b, 2);
+      expect(battle.flag, isFalse);
+      expect(g.state.owner[1], 2);
+    });
+
+    test('taken in full, falls silently and never rises again', () {
+      final g = gameWith(frontier, units: [60, 0, 0, 60]);
+      turn(g, {
+        0: Orders()..moves.add(const MoveOrder(0, 1, 60)),
+        1: Orders()..moves.add(const MoveOrder(3, 2, 60)),
+      });
+      expect(g.state.owner.sublist(1, 3), [0, 1]);
+      expect(g.state.alive[2], isFalse);
+      for (var i = 0; i < 30; i++) {
+        final r = turn(g, {});
+        expect(has(r, EventKind.eliminated) || has(r, EventKind.revolt), isFalse);
+      }
+      expect(g.state.gains, isEmpty, reason: 'land taken from nobody is no war gain');
+    });
+
+    test('never wins, however much of the map it holds', () {
+      final g = gameWith(frontier, units: [5, 0, 0, 5], winFraction: 0.5);
+      expect(has(turn(g, {}), EventKind.gameOver), isFalse);
+    });
+
+    test('the AI takes it when it can', () {
+      // Rich enough to raise what the people of the land can hold off.
+      final rich = tinyWorld(links: frontier.provinces.map((p) => p.adj).toList(), owners: [0, 2, 2, 1], income: [12, 1, 1, 12], wild: 2);
+      final g = Game.start(rich, human: -1, seed: 3);
+      for (var i = 0; i < 80 && g.state.alive[2]; i++) {
+        g.endTurn(null);
+        checkInvariants(g);
+      }
+      expect(g.state.alive[2], isFalse);
+    });
+  });
+
+  group('calendar and victory', () {
+    test('a longer turn moves the calendar faster', () {
+      expect(Game.start(line, human: -1, seed: 1).dateLabel(5), 'Jan 1915');
+      expect(Game.start(line, human: -1, seed: 1, monthsPerTurn: 3).dateLabel(2), 'Feb 1915');
+      expect(Game.start(line, human: -1, seed: 1, monthsPerTurn: 12).dateLabel(1000), 'Aug 2914');
+    });
+
+    Game endless({required int human}) {
+      final g = Game.start(line, human: human, seed: 1, endless: true);
+      g.state.owner[2] = 0;
+      g.state.units.setAll(0, [0, 0, 50, 0]);
+      return g;
+    }
+
+    final attack = {0: Orders()..moves.add(const MoveOrder(2, 3, 50))};
+
+    test('nobody wins an endless game, even holding the whole map', () {
+      final g = endless(human: -1);
+      turn(g, attack);
+      expect(g.provinceCount(0), 4);
+      expect(g.state.ended, isFalse);
+    });
+
+    test('an endless game still ends when the player falls', () {
+      final g = endless(human: 1);
+      final r = turn(g, attack);
+      expect(g.state.ended, isTrue);
+      expect(g.state.winner, -1);
+      expect(r.events.last.kind, EventKind.gameOver);
+      g.state.ended = false;
+      expect(has(turn(g, {}), EventKind.gameOver), isFalse, reason: 'watching on, the fall is not reported again');
     });
   });
 
@@ -909,6 +1193,28 @@ void main() {
             HistoryEvent(turn: 1, text: 'Two joins Nought and attacks One.', alliances: [(2, 0)], wars: [(2, 1)]),
           ],
         );
+
+    test('in a game of longer turns, happens in the turn that holds its month', () {
+      final g = Game.start(scripted(), human: -1, seed: 1, monthsPerTurn: 3);
+      expect(has(turn(g, {}), EventKind.history), isTrue, reason: 'month 1 falls in the first season');
+      final yearly = Game.start(
+        tinyWorld(
+          links: [
+            [1],
+            [0],
+          ],
+          owners: [0, 1],
+          history: const [
+            HistoryEvent(turn: 14, text: 'War.', wars: [(0, 1)])
+          ],
+        ),
+        human: -1,
+        seed: 1,
+        monthsPerTurn: 12,
+      );
+      expect(has(turn(yearly, {}), EventKind.history), isFalse);
+      expect(has(turn(yearly, {}), EventKind.history), isTrue);
+    });
 
     test('replays on its turn', () {
       final g = gameWith(scripted(), units: [5, 5, 5]);
@@ -1097,11 +1403,14 @@ void main() {
       'difficulty',
       'fog',
       'randomEvents',
+      'monthsPerTurn',
       'relations',
       'pacts',
       'pactOffers',
       'pactAsked',
       'pending',
+      'guarantees',
+      'armsCalls',
     ]) {
       expect(state.remove(key), isNotNull, reason: key);
     }
@@ -1138,7 +1447,10 @@ void main() {
       ..offerPact.add(11)
       ..envoys.add(12)
       ..gifts[13] = 40
-      ..answer = 1;
+      ..answer = 1
+      ..guarantee.add(14)
+      ..revokeGuarantee.add(15)
+      ..callToArms.add(16);
     final back = Orders.fromJson(jsonDecode(jsonEncode(o.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(o.toJson()));
   });

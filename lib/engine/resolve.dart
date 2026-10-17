@@ -89,8 +89,10 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
 
   final declarations = <(int, int)>[];
   for (var i = 0; i < w.history.length; i++) {
+    // History is dated in months; a longer turn takes in every event of its
+    // months.
     final h = w.history[i];
-    if (h.turn != turn) continue;
+    if (h.turn ~/ s.monthsPerTurn != turn) continue;
     var happened = false;
     for (final (a, b) in h.alliances) {
       if (!g.canOfferAlliance(a, b)) continue;
@@ -105,8 +107,38 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       final (from, to) = pairOf(offer);
       events.add(GameEvent(EventKind.allianceOffered, a: from, b: to));
     }
+    for (final (a, b) in h.breaks) {
+      if (!g.allied(a, b)) continue;
+      happened = true;
+      s.alliances.remove(pairKey(a, b));
+    }
+    for (final (a, b) in h.guarantees) {
+      if (!g.canGuarantee(a, b) || a == s.human) continue;
+      happened = true;
+      s.guarantees.add(directedKey(a, b));
+      s.changeRelation(a, b, Rules.guaranteeRelation);
+    }
+    for (final (a, b) in h.pacts) {
+      if (!g.canOfferPact(a, b)) continue;
+      happened = true;
+      if (a != s.human && b != s.human) {
+        s.pacts[pairKey(a, b)] = turn + 1 + Rules.pactTurns;
+        continue;
+      }
+      final offer = a == s.human ? directedKey(b, a) : directedKey(a, b);
+      s.pactOffers[offer] = turn + Rules.peaceOfferTurns;
+      s.pactAsked[offer] = turn;
+      final (from, to) = pairOf(offer);
+      events.add(GameEvent(EventKind.pactOffered, a: from, b: to));
+    }
     for (final (a, b) in h.wars) {
-      if (a == s.human || !g.canDeclareWar(a, b)) continue;
+      if (a == s.human) continue;
+      // History may tear up a pact, as it did; nothing else stands in its way.
+      final pact = s.pacts.remove(pairKey(a, b));
+      if (!g.canDeclareWar(a, b)) {
+        if (pact != null) s.pacts[pairKey(a, b)] = pact;
+        continue;
+      }
       happened = true;
       declarations.add((a, b));
     }
@@ -126,8 +158,9 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     s.openWar(n, target, turn);
     events.add(GameEvent(EventKind.warDeclared, a: n, b: target));
     for (final ally in defenders) {
+      final guarantor = !g.allied(ally, target) && g.overlordOf(target) != ally;
       s.openWar(ally, n, turn);
-      events.add(GameEvent(EventKind.calledToArms, a: ally, b: n, n1: target));
+      events.add(GameEvent(EventKind.calledToArms, a: ally, b: n, n1: target, flag: guarantor));
     }
   }
   // Leaving an alliance comes after the declarations, so nobody can break
@@ -138,6 +171,31 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       s.alliances.remove(pairKey(n, ally));
       s.changeRelation(n, ally, Rules.brokenRelation);
       events.add(GameEvent(EventKind.allianceBroken, a: n, b: ally));
+    }
+    for (final other in o.revokeGuarantee.toList()..sort()) {
+      if (!g.guarantees(n, other)) continue;
+      s.guarantees.remove(directedKey(n, other));
+      s.changeRelation(n, other, Rules.brokenRelation);
+      events.add(GameEvent(EventKind.guaranteeRevoked, a: n, b: other));
+    }
+  }
+  // Calls to arms: the allies answer them in their orders from next turn.
+  for (final (n, o) in each()) {
+    for (final enemy in o.callToArms.toList()..sort()) {
+      if (!g.canCallToArms(n, enemy)) continue;
+      final key = directedKey(n, enemy);
+      final fresh = !s.armsCalls.containsKey(key);
+      s.armsCalls[key] = turn + Rules.armsCallTurns;
+      if (fresh) events.add(GameEvent(EventKind.armsCalled, a: n, b: enemy));
+    }
+  }
+  // New guarantees count from the next declaration on.
+  for (final (n, o) in each()) {
+    for (final other in o.guarantee.toList()..sort()) {
+      if (!g.canGuarantee(n, other)) continue;
+      s.guarantees.add(directedKey(n, other));
+      s.changeRelation(n, other, Rules.guaranteeRelation);
+      events.add(GameEvent(EventKind.guaranteeGiven, a: n, b: other));
     }
   }
   _matchOffers(
@@ -314,7 +372,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
         arrivals[m.to] += count;
       } else {
         final key = pairKey(n, target);
-        if (!warsBefore.contains(key) || !s.wars.contains(key)) continue;
+        if (!w.isWild(target) && (!warsBefore.contains(key) || !s.wars.contains(key))) continue;
         attacks.putIfAbsent(m.to, () => {}).putIfAbsent(n, () => _Attack(n)).add(m.from, count, bySea: bySea);
       }
       moved[m.from] += count;
@@ -334,7 +392,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     var holder = original;
     var holderUnits = s.units[p];
     for (final a in attackers) {
-      if (!s.wars.contains(pairKey(a.nation, holder))) {
+      if (!g.fighting(a.nation, holder)) {
         // Someone they are not fighting got there first: fall back, if home
         // is still theirs.
         for (final origin in a.origins.entries) {
@@ -380,8 +438,10 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       s.heldSince[p] = turn;
       // A siege leaves the walls a level lower.
       if (s.forts[p] > 0) s.forts[p]--;
-      s.lastGain[pairKey(holder, original)] = turn;
-      s.gains.update(directedKey(holder, original), (n) => n + 1, ifAbsent: () => 1);
+      if (!w.isWild(original)) {
+        s.lastGain[pairKey(holder, original)] = turn;
+        s.gains.update(directedKey(holder, original), (n) => n + 1, ifAbsent: () => 1);
+      }
       events.add(GameEvent(EventKind.captured, a: holder, b: original, province: p));
     }
   }
@@ -419,6 +479,17 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   }
   for (var n = 0; n < nationCount; n++) {
     if (!s.alive[n]) continue;
+    if (w.isWild(n)) {
+      // The last unclaimed land taken: nobody falls. While some is left,
+      // its seat is wherever it still lies.
+      if (held[n] == 0) {
+        s.alive[n] = false;
+        s.capital[n] = -1;
+      } else if (s.owner[s.capital[n]] != n) {
+        s.capital[n] = s.owner.indexOf(n);
+      }
+      continue;
+    }
     if (held[n] == 0) {
       final conqueror = events.lastWhere((e) => (e.kind == EventKind.captured || e.kind == EventKind.revolt) && e.b == n, orElse: () => const GameEvent(EventKind.captured)).a;
       s.alive[n] = false;
@@ -438,9 +509,9 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
 
   // ---------------------------------------------------------- 6. economy
   // Reparations and tribute come out of the income before upkeep.
-  final incomes = [for (var n = 0; n < nationCount; n++) s.alive[n] ? g.incomeOf(n) : 0];
+  final incomes = [for (var n = 0; n < nationCount; n++) s.alive[n] && !w.isWild(n) ? g.incomeOf(n) : 0];
   for (var n = 0; n < nationCount; n++) {
-    if (!s.alive[n]) continue;
+    if (!s.alive[n] || w.isWild(n)) continue;
     final income = incomes[n];
     s.gold[n] += income - g.tributeOwed(n, incomes) - g.upkeepOf(n);
     if (s.gold[n] >= 0) {
@@ -476,6 +547,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   if (s.randomEvents) rollHappenings(g, rng, events);
 
   // ---------------------------------------------------------- 7. victory
+  final fell = s.human >= 0 && events.any((e) => e.kind == EventKind.eliminated && e.a == s.human);
   if (!s.ended && !s.sandbox) {
     // A vassal's land counts for its overlord, and only a free nation wins.
     final realm = List.of(held);
@@ -485,7 +557,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     var leader = -1;
     var free = 0;
     for (var n = 0; n < nationCount; n++) {
-      if (!s.alive[n] || s.overlord[n] >= 0) continue;
+      if (!s.alive[n] || s.overlord[n] >= 0 || w.isWild(n)) continue;
       free++;
       if (leader < 0 || realm[n] > realm[leader]) leader = n;
     }
@@ -493,11 +565,13 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       s.ended = true;
       s.winner = leader;
       events.add(GameEvent(EventKind.gameOver, a: leader));
-    } else if (s.human >= 0 && !s.alive[s.human]) {
-      s.ended = true;
-      s.winner = -1;
-      events.add(const GameEvent(EventKind.gameOver));
     }
+  }
+  // The player's fall ends the game for them even when nobody can win.
+  if (!s.ended && fell) {
+    s.ended = true;
+    s.winner = -1;
+    events.add(const GameEvent(EventKind.gameOver));
   }
 
   s.turn = turn + 1;
@@ -505,6 +579,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   s.allianceOffers.removeWhere((_, lapses) => lapses <= s.turn);
   s.allianceAsked.removeWhere((_, asked) => asked + Rules.aiAllianceRetryTurns <= s.turn);
   s.pactOffers.removeWhere((_, lapses) => lapses <= s.turn);
+  s.armsCalls.removeWhere((_, lapses) => lapses <= s.turn);
   s.pactAsked.removeWhere((_, asked) => asked + Rules.aiAllianceRetryTurns <= s.turn);
   s.pacts.removeWhere((_, until) => until <= s.turn);
   s.tribute.removeWhere((_, until) => until <= s.turn);

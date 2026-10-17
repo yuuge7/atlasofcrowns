@@ -8,10 +8,10 @@ import 'package:atlasofcrowns/engine/world.dart';
 /// The real map and scenario, straight from the asset files.
 World loadEurope1914() => loadScenario('1914');
 
-World loadScenario(String id) => World.fromJson(
-      jsonDecode(File('assets/map/europe.json').readAsStringSync()) as Map<String, dynamic>,
-      jsonDecode(File('assets/scenarios/$id.json').readAsStringSync()) as Map<String, dynamic>,
-    );
+World loadScenario(String id) {
+  final scenario = jsonDecode(File('assets/scenarios/$id.json').readAsStringSync()) as Map<String, dynamic>;
+  return World.fromJson(jsonDecode(File('assets/map/${scenario['map'] ?? 'europe'}.json').readAsStringSync()) as Map<String, dynamic>, scenario);
+}
 
 /// A hand-made world. [links] lists each province's neighbors, [owners] who
 /// starts where. Nation n's capital is its first province.
@@ -24,6 +24,10 @@ World tinyWorld({
   List<HistoryEvent> history = const [],
   List<List<int>>? coast,
   List<SeaZone> seas = const [],
+  int wild = -1,
+  List<double>? aggression,
+  List<List<int>> guarantees = const [],
+  List<List<int>> pacts = const [],
 }) {
   final nationCount = owners.reduce((a, b) => a > b ? a : b) + 1;
   return World(
@@ -36,11 +40,14 @@ World tinyWorld({
       for (var p = 0; p < links.length; p++) Province(id: p, name: 'P$p', modern: 'TST', area: 1000, adj: links[p], sea: const [], income: income?[p] ?? 2, coast: coast?[p] ?? const []),
     ],
     nations: [
-      for (var n = 0; n < nationCount; n++) Nation(id: n, tag: 'N$n', name: 'Nation $n', shortName: 'N$n', color: 0xFF000000, capital: owners.indexOf(n)),
+      for (var n = 0; n < nationCount; n++)
+        Nation(id: n, tag: 'N$n', name: 'Nation $n', shortName: 'N$n', color: 0xFF000000, capital: owners.indexOf(n), wild: n == wild, aggression: aggression?[n] ?? 1),
     ],
     startOwners: owners,
     startWars: wars,
     startAlliances: alliances,
+    startGuarantees: guarantees,
+    startPacts: pacts,
     history: history,
     seas: seas,
   );

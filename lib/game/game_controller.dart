@@ -13,6 +13,7 @@ import '../engine/rules.dart';
 import '../engine/state.dart';
 import '../engine/world.dart';
 import '../map/map_camera.dart';
+import '../map/map_geometry.dart';
 import '../map/map_painters.dart';
 import '../map/map_scene.dart';
 import '../theme.dart';
@@ -59,6 +60,7 @@ enum Relation {
   war(AtlasColors.mapEnemy, 'At war'),
   truce(AtlasColors.mapTruce, 'Truce'),
   pact(AtlasColors.mapPact, 'Pact'),
+  wild(AtlasColors.mapWild, 'Unclaimed'),
   peace(AtlasColors.mapNeutral, 'Peace');
 
   const Relation(this.color, this.legend);
@@ -107,8 +109,9 @@ class Replay {
 class GameController extends ChangeNotifier {
   GameController({required this.assets, required this.saves, required this.game, Orders? orders, List<List<int>> marches = const []})
       : orders = orders ?? Orders(),
-        scene = MapScene(assets.geometry, game.world),
-        camera = MapCamera(assets.geometry.size) {
+        geometry = assets.geometryOf(game.world),
+        scene = MapScene(assets.geometryOf(game.world), game.world),
+        camera = MapCamera(assets.geometryOf(game.world).size) {
     _newTurn();
     // A saved march finds this turn's step again among the saved orders.
     for (final [at, to, count, next] in marches) {
@@ -126,6 +129,9 @@ class GameController extends ChangeNotifier {
   final GameAssets assets;
   final SaveStore saves;
   final Game game;
+
+  /// The map this game is played on.
+  final MapGeometry geometry;
   final MapScene scene;
   final MapCamera camera;
   final MapOverlay overlay = MapOverlay();
@@ -174,6 +180,7 @@ class GameController extends ChangeNotifier {
   /// How [nation] stands with the player.
   Relation relationTo(int nation) {
     if (nation == human) return Relation.you;
+    if (world.isWild(nation)) return Relation.wild;
     if (game.overlordOf(nation) == human || game.overlordOf(human) == nation) return Relation.bound;
     if (game.allied(human, nation)) return Relation.ally;
     if (game.atWar(human, nation)) return Relation.war;
@@ -206,7 +213,9 @@ class GameController extends ChangeNotifier {
         final colors = [for (var n = 0; n < world.nations.length; n++) relationTo(n).color];
         return [for (final o in owners) colors[o]];
       case MapMode.relations:
-        final colors = [for (var n = 0; n < world.nations.length; n++) n == human ? AtlasColors.mapYou : relationColor(feeling(n))];
+        final colors = [
+          for (var n = 0; n < world.nations.length; n++) n == human ? AtlasColors.mapYou : (world.isWild(n) ? AtlasColors.mapWild : relationColor(feeling(n))),
+        ];
         return [for (final o in owners) colors[o]];
       case MapMode.economy:
         return [for (var p = 0; p < owners.length; p++) incomeColor(game.provinceIncome(p))];
@@ -271,7 +280,8 @@ class GameController extends ChangeNotifier {
           if (game.canMove(human, p, q)) q,
       ];
 
-  bool isHostile(int p) => state.owner[p] != human && game.atWar(human, state.owner[p]);
+  /// Whether moving into [p] is an attack: on an enemy, or on unclaimed land.
+  bool isHostile(int p) => state.owner[p] != human && game.fighting(human, state.owner[p]);
 
   /// Nations with a peace offer waiting for the player's answer.
   List<int> get peaceOffers => [
@@ -286,6 +296,9 @@ class GameController extends ChangeNotifier {
           for (var n = 0; n < world.nations.length; n++)
             if (game.hasAllianceOffer(n, human) && game.canOfferAlliance(human, n)) n,
       ];
+
+  /// The player's allies.
+  Set<int> get allies => commanding ? {...game.alliesOf(human)} : const {};
 
   /// Nations with a pact offer waiting for the player's answer.
   List<int> get pactOffers => [
@@ -505,6 +518,18 @@ class GameController extends ChangeNotifier {
 
   void setPactOffered(int nation, bool offered) => _setOrder(orders.offerPact, nation, offered, game.canOfferPact(human, nation));
 
+  /// Calls the player's allies to arms against [enemy] at the end of the
+  /// turn, or thinks better of it.
+  void setArmsCalled(int enemy, bool called) => _setOrder(orders.callToArms, enemy, called, game.canCallToArms(human, enemy));
+
+  /// Guarantees [nation]'s independence at the end of the turn, or thinks
+  /// better of it.
+  void setGuarantee(int nation, bool given) => _setOrder(orders.guarantee, nation, given, game.canGuarantee(human, nation));
+
+  /// Withdraws the player's guarantee of [nation] at the end of the turn, or
+  /// keeps it after all.
+  void setGuaranteeRevoked(int nation, bool revoked) => _setOrder(orders.revokeGuarantee, nation, revoked, game.guarantees(human, nation));
+
   /// Sends an envoy to [nation] at the end of the turn, or calls it back.
   void setEnvoy(int nation, bool sent) => _setOrder(orders.envoys, nation, sent, commanding && game.canCourt(human, nation) && game.envoyCost(nation) <= goldFree);
 
@@ -685,8 +710,8 @@ class GameController extends ChangeNotifier {
       ..recruits = {for (final r in orders.recruits) r.province: r.count}
       ..forts = state.forts
       ..capitals = {
-        for (final c in state.capital)
-          if (c >= 0) c,
+        for (var n = 0; n < state.capital.length; n++)
+          if (state.capital[n] >= 0 && !world.isWild(n)) state.capital[n],
       }
       ..changed();
     notifyListeners();

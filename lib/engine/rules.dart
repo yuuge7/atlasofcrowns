@@ -18,6 +18,10 @@ abstract final class Rules {
   static const int militiaBase = 2;
   static const double militiaPerIncome = 0.5;
 
+  /// The people of unclaimed land defend it this many times as hard as a
+  /// militia would.
+  static const double wildMilitia = 4;
+
   /// Each side's strength is scaled by a roll in [1 - spread, 1 + spread].
   static const double combatSpread = 0.15;
 
@@ -125,6 +129,16 @@ abstract final class Rules {
   static const int giftGain = 10;
   static const int giftMaxGain = 30;
 
+  /// A call to arms stands for this many end-of-turns.
+  static const int armsCallTurns = 3;
+
+  /// The AI answers an ally's call to arms when it likes the caller at
+  /// least this much.
+  static const int aiArmsCallRelation = 20;
+
+  /// Guaranteeing a nation's independence warms its relations by this much.
+  static const int guaranteeRelation = 10;
+
   /// A non-aggression pact binds both sides for this many turns, and can be
   /// renewed once fewer than [pactRenewTurns] are left.
   static const int pactTurns = 36;
@@ -141,10 +155,22 @@ abstract final class Rules {
   static const int startGoldPerIncome = 2;
   static const double defaultWinFraction = 0.4;
 
+  /// The shares of all provinces a game can be won with.
+  static const List<double> winFractions = [0.3, 0.4, 0.6, 0.75, 1.0];
+
+  /// What a turn can stand for on the calendar, in months.
+  static const List<int> turnLengths = [1, 3, 12];
+
   // Difficulty
   /// What the AI nations earn, against a normal income, on each difficulty
   /// from easiest to hardest. The player always earns the normal income.
   static const List<double> aiIncome = [0.8, 1.0, 1.25];
+
+  /// On each difficulty, how the AI weighs a war on the player against one
+  /// on anyone else (below 1: it looks for other prey first), and the turns
+  /// at the start in which it declares none on the player at all.
+  static const List<double> aiPlayerTarget = [0.5, 0.75, 1.0];
+  static const List<int> aiSparePlayerTurns = [36, 12, 0];
   static const int normalDifficulty = 1;
 
   // AI
@@ -171,6 +197,17 @@ abstract final class Rules {
   /// After proposing an alliance, the AI waits this many turns before it
   /// asks the same nation again.
   static const int aiAllianceRetryTurns = 12;
+
+  /// A nation whose temper ([Nation.aggression]) is below [aiContentTemper]
+  /// keeps its alliances through a long peace; at [aiPeacefulTemper] or
+  /// below it starts no war at all and stays neutral, allying only with a
+  /// friend who asks.
+  static const double aiContentTemper = 0.5;
+  static const double aiPeacefulTemper = 0.05;
+
+  /// After taking a province of unclaimed land, the AI waits this many turns
+  /// before it goes after another.
+  static const int aiSettleTurns = 24;
 
   /// An AI vassal throws off its overlord once it is this strong against it.
   static const double aiIndependence = 0.75;

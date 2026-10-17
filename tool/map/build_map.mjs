@@ -1,16 +1,22 @@
-// Map pipeline: Natural Earth admin-1 -> ~300 game provinces.
+// Map pipeline: Natural Earth admin units -> ~300 game provinces per map.
 //
-//   node build_map.mjs [--fresh] [--simplify=<percent>]
+//   node build_map.mjs [--map=europe|america] [--fresh] [--simplify=<percent>]
 //
 // Stage 1 (mapshaper): clip to the game window, delete tiny islands, project.
-// Stage 2 (here):      assign 1914 owners, merge small units into provinces.
+// Stage 2 (here):      assign each unit its owner key, merge units into provinces.
 // Stage 3 (mapshaper): dissolve by province, simplify, clean.
 // Stage 4 (here):      quantize, adjacency, sea links, income, write assets.
 //
-// Outputs assets/map/europe.json, one assets/scenarios/<id>.json per scenario
-// and assets/scenarios/index.json listing them, plus preview PNGs and province
-// lists under tool/map/out/ for eyeballing the result. The 1914 config shapes
-// the map; every other scenario only assigns its provinces.
+// Outputs assets/map/<map>.json, one assets/scenarios/<id>.json per scenario
+// on that map and assets/scenarios/index.json listing every scenario of every
+// map, plus preview PNGs and province lists under tool/map/out/ (out/<map>/
+// for maps other than Europe) for eyeballing the result. The map config shapes
+// the map; the scenarios only assign its provinces.
+//
+// Europe is built from admin-1 and its config is also the 1914 scenario.
+// North America is built from US counties (admin-2) and the admin-1 units of
+// its other countries, Canada's cut on a grid first, with the big lakes
+// erased.
 import mapshaper from 'mapshaper';
 import polylabel from 'polylabel';
 import { Resvg } from '@resvg/resvg-js';
@@ -18,20 +24,29 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as cfg from './config/scenario_1914.mjs';
-import * as modernCfg from './config/scenario_modern.mjs';
+const args = process.argv.slice(2);
+const fresh = args.includes('--fresh');
+const simplifyPct = Number((args.find((a) => a.startsWith('--simplify=')) ?? '--simplify=26').split('=')[1]);
+const mapArg = (args.find((a) => a.startsWith('--map=')) ?? '--map=europe').split('=')[1];
+
+/** Every map: the config that shapes it, then the scenarios played on it. */
+const MAPS = {
+  europe: { config: './config/scenario_1914.mjs', scenarios: ['./config/scenario_1936.mjs', './config/scenario_modern.mjs'] },
+  america: { config: './config/america_map.mjs', scenarios: ['./config/america_1776.mjs', './config/america_1861.mjs', './config/america_fifty.mjs', './config/america_modern.mjs'] },
+};
+/** The order scenarios are offered in, across maps. */
+const SCENARIO_ORDER = ['1914', '1936', 'modern', 'america1776', 'america1861', 'americaFifty', 'americaModern'];
+if (!MAPS[mapArg]) throw new Error(`no map ${mapArg}; maps are ${Object.keys(MAPS).join(', ')}`);
+const cfg = await import(MAPS[mapArg].config);
+const MAP_NAME = cfg.MAP_NAME ?? 'europe';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const raw = (p) => path.join(here, 'raw', p);
-const out = (p) => path.join(here, 'out', p);
+const out = (p) => path.join(here, MAP_NAME === 'europe' ? 'out' : `out/${MAP_NAME}`, p);
 mkdirSync(out(''), { recursive: true });
 mkdirSync(path.join(root, 'assets/map'), { recursive: true });
 mkdirSync(path.join(root, 'assets/scenarios'), { recursive: true });
-
-const args = process.argv.slice(2);
-const fresh = args.includes('--fresh');
-const simplifyPct = Number((args.find((a) => a.startsWith('--simplify=')) ?? '--simplify=26').split('=')[1]);
 
 /** Map units: the window is MAP_W wide; coordinates are stored as ints * SCALE. */
 const MAP_W = 2048;
@@ -50,6 +65,7 @@ const UNIT = (X1 - X0) / MAP_W; // metres of Mercator per map unit
 const MAP_H = Math.round((Y1 - Y0) / UNIT);
 const toMap = ([x, y]) => [(x - X0) / UNIT, (Y1 - y) / UNIT];
 const lonLatToMap = ([lon, lat]) => toMap([mercX(lon), mercY(lat)]);
+const toLonLat = ([x, y]) => [cfg.BBOX.w + (x / MAP_W) * (cfg.BBOX.e - cfg.BBOX.w), mercLat(Y1 - y * UNIT)];
 
 // ---------------------------------------------------------------- topology helpers
 const ringsOf = (g) => (g.type === 'Polygon' ? g.arcs : g.type === 'MultiPolygon' ? g.arcs.flat() : []);
@@ -100,7 +116,9 @@ function pointInRings(rings, [x, y]) {
 
 // ---------------------------------------------------------------- stage 1
 const stage1Path = out('stage1.json');
-if (fresh || !existsSync(stage1Path)) {
+if ((fresh || !existsSync(stage1Path)) && cfg.COUNTRIES) {
+  await stage1Counties();
+} else if (fresh || !existsSync(stage1Path)) {
   const { w, s, e, n } = cfg.BBOX;
   console.log('stage 1: clip, drop islands, project');
   await mapshaper.runCommands(
@@ -113,6 +131,76 @@ if (fresh || !existsSync(stage1Path)) {
       `-filter-islands min-area=${cfg.AREA.islandPart}km2 remove-empty`,
       `-each "area_km2 = this.area / 1e6"`,
       `-filter-fields adm1_code,iso_3166_2,name,name_en,admin,adm0_a3,region,area_km2`,
+      `-proj webmercator`,
+      `-o format=topojson no-quantization "${stage1Path}"`,
+    ].join(' '),
+  );
+  await mapshaper.runCommands(
+    [
+      `-i "${raw('places/ne_10m_populated_places_simple.shp')}"`,
+      `-filter "longitude > ${w} && longitude < ${e} && latitude > ${s} && latitude < ${n}"`,
+      `-filter-fields name,pop_max,adm0_a3,latitude,longitude,featurecla`,
+      `-o format=json "${out('places.json')}"`,
+    ].join(' '),
+  );
+}
+
+/**
+ * Stage 1 for a map of US counties and the admin-1 units of cfg.COUNTRIES:
+ * Canada's units are cut on cfg.GRID first, lakes over cfg.LAKE_KM2 are
+ * erased, and the county fields are renamed to match admin-1's.
+ */
+async function stage1Counties() {
+  const { w, s, e, n } = cfg.BBOX;
+  console.log('stage 1: counties, admin-1 and a grid; clip, erase lakes, drop islands, project');
+  const tmp = (f) => out(`tmp_${f}`);
+  const keep = 'adm1_code,iso_3166_2,name,admin,adm0_a3,region';
+  await mapshaper.runCommands(
+    [
+      `-i "${raw('counties/ne_10m_admin_2_counties.shp')}"`,
+      `-filter "ADM0_A3 == 'USA'"`,
+      `-each "adm0_a3 = ADM0_A3, name = NAME, region = REGION, iso_3166_2 = 'US-' + REGION, admin = ADMIN, adm1_code = ADM2_CODE"`,
+      `-filter-fields ${keep}`,
+      `-o format=geojson "${tmp('us.json')}"`,
+    ].join(' '),
+  );
+  const others = cfg.COUNTRIES.filter((c) => c !== cfg.GRID.country);
+  await mapshaper.runCommands(
+    [`-i "${raw('admin1/ne_10m_admin_1_states_provinces.shp')}"`, `-filter '${JSON.stringify(others)}.indexOf(adm0_a3) >= 0'`, `-filter-fields ${keep}`, `-o format=geojson "${tmp('others.json')}"`].join(' '),
+  );
+  // The grid: cells of dLon x dLat degrees over the window.
+  const cells = [];
+  for (let x = w; x < e; x += cfg.GRID.dLon) {
+    for (let y = s; y < n; y += cfg.GRID.dLat) {
+      const x1 = Math.min(e, x + cfg.GRID.dLon);
+      const y1 = Math.min(n, y + cfg.GRID.dLat);
+      cells.push({ type: 'Feature', properties: { cell: cells.length }, geometry: { type: 'Polygon', coordinates: [[[x, y], [x1, y], [x1, y1], [x, y1], [x, y]]] } });
+    }
+  }
+  writeFileSync(tmp('grid.json'), JSON.stringify({ type: 'FeatureCollection', features: cells }));
+  await mapshaper.runCommands(
+    [`-i "${raw('admin1/ne_10m_admin_1_states_provinces.shp')}"`, `-filter "adm0_a3 == '${cfg.GRID.country}'"`, `-filter-fields ${keep}`, `-o format=geojson "${tmp('gridded.json')}"`].join(' '),
+  );
+  await mapshaper.runCommands(
+    [`-i combine-files "${tmp('gridded.json')}" "${tmp('grid.json')}"`, `-union target=tmp_gridded,tmp_grid`, `-filter "adm0_a3 != null"`, `-filter-fields ${keep}`, `-o format=geojson "${tmp('cells.json')}"`].join(' '),
+  );
+  await mapshaper.runCommands(
+    [
+      `-i "${raw('lakes/ne_10m_lakes.shp')}"`,
+      `-filter "this.bounds[2] > ${w} && this.bounds[0] < ${e} && this.bounds[3] > ${s} && this.bounds[1] < ${n}"`,
+      `-filter "this.area / 1e6 > ${cfg.LAKE_KM2} && name.indexOf('eservoir') < 0"`,
+      `-o format=geojson "${tmp('lakes.json')}"`,
+    ].join(' '),
+  );
+  await mapshaper.runCommands(
+    [
+      `-i combine-files "${tmp('us.json')}" "${tmp('cells.json')}" "${tmp('others.json')}"`,
+      `-merge-layers force`,
+      `-clip bbox=${w},${s},${e},${n}`,
+      `-erase "${tmp('lakes.json')}"`,
+      `-filter-islands min-area=${cfg.AREA.islandPart}km2 remove-empty`,
+      `-each "area_km2 = this.area / 1e6"`,
+      `-filter-fields ${keep},area_km2`,
       `-proj webmercator`,
       `-o format=topojson no-quantization "${stage1Path}"`,
     ].join(' '),
@@ -166,7 +254,7 @@ geoms1.forEach((g, gi) => {
     samples,
   });
 });
-if (unclassified.size) console.warn('  dropped, no 1914 owner:', Object.fromEntries(unclassified));
+if (unclassified.size) console.warn('  dropped, no owner:', Object.fromEntries(unclassified));
 
 for (const [id, users] of arcUsers(geoms1)) {
   const list = [...users].filter((gi) => clusters.has(gi));
@@ -202,7 +290,7 @@ function bestNeighbor(c, sameKey) {
   for (const [n, len] of c.nb) {
     const other = clusters.get(n);
     if (sameKey && other.key !== c.key) continue;
-    if (!sameKey && cfg.KEEP_GROUPS.includes(other.group)) continue;
+    if (!sameKey && (cfg.KEEP_GROUPS ?? []).includes(other.group)) continue;
     let score = len / Math.sqrt(other.area);
     if (sameKey && region && regionOf(other) === region) score *= 1.6;
     if (score > bestScore) {
@@ -234,7 +322,7 @@ for (let changed = true; changed; ) {
   changed = false;
   for (const c of bySmallest()) {
     if (c.area >= cfg.AREA.absorb) break;
-    if (cfg.KEEP_GROUPS.includes(c.group) || c.nb.size === 0) continue;
+    if ((cfg.KEEP_GROUPS ?? []).includes(c.group) || c.nb.size === 0) continue;
     const n = bestNeighbor(c, false);
     if (n) {
       merge(n, c);
@@ -287,6 +375,12 @@ for (const c of clusters.values()) {
 }
 const keyTarget = new Map();
 for (const [key, area] of keyArea) {
+  const owner = key.split('|')[0];
+  if (cfg.KEY_TARGETS) {
+    if (cfg.KEY_TARGETS[owner] === undefined) throw new Error(`no province count for ${owner}`);
+    keyTarget.set(key, cfg.KEY_TARGETS[owner]);
+    continue;
+  }
   const group = key.split('|')[1];
   let total = cfg.TARGETS[group];
   if (total === undefined) {
@@ -361,7 +455,7 @@ const arcsMap = arcsQ.map((flat) => {
   return pts;
 });
 
-const nationIndex = new Map(cfg.NATIONS.map((n, i) => [n.tag, i]));
+const nationIndex = new Map((cfg.NATIONS ?? []).map((n, i) => [n.tag, i]));
 const provinces = geoms.map((g, id) => {
   const polys = polygonsOf(g).map((poly) => poly.map((ring) => ringCoords(arcsMap, ring)));
   const biggest = polys.reduce((best, poly) => (Math.abs(ringArea(poly[0])) > Math.abs(ringArea(best[0])) ? poly : best));
@@ -376,7 +470,7 @@ const provinces = geoms.map((g, id) => {
       if (y > maxY) maxY = y;
     }
   }
-  if (!nationIndex.has(g.properties.owner)) throw new Error(`unknown owner ${g.properties.owner}`);
+  if (cfg.NATIONS && !nationIndex.has(g.properties.owner)) throw new Error(`unknown owner ${g.properties.owner}`);
   return {
     id,
     name: g.properties.pname,
@@ -387,6 +481,7 @@ const provinces = geoms.map((g, id) => {
     rings,
     bounds: [minX, minY, maxX, maxY],
     label: [label[0], label[1]],
+    lonLat: toLonLat([label[0], label[1]]),
     radius: label.distance,
     adj: new Set(),
     sea: new Set(),
@@ -455,8 +550,9 @@ console.log(`  ${placed}/${places.length} cities placed`);
 /** Income from the people living there, scaled by how developed it is. */
 const incomeFor = (p, development) => Math.max(1, Math.round((1.5 + Math.sqrt(p.pop / 100000)) * development));
 
-// 1914 income: modern population, scaled by how developed the region was.
-for (const p of provinces) p.income = incomeFor(p, cfg.DEVELOPMENT[p.modern] ?? 1);
+// Base income, for the previews: modern population, scaled by how developed
+// the region was in the map's own scenario.
+for (const p of provinces) p.income = incomeFor(p, cfg.DEVELOPMENT?.[p.modern] ?? 1);
 
 /**
  * Names the provinces after their biggest city, through [rename]; when two
@@ -467,18 +563,36 @@ function pickNames(rename) {
   return provinces.map((p) => {
     let name = rename[p.baseName] ?? p.baseName;
     if (used.has(name)) name = rename[p.adminName] ?? p.adminName;
+    if (used.has(name)) name = compassName(p, name, used);
     if (used.has(name)) throw new Error(`duplicate province name ${name}`);
     used.add(name);
     return name;
   });
 }
 
-// Names: the biggest city, as it was called in 1914.
+/**
+ * A free name for [p], one of several cityless provinces of one unit called
+ * [name]: the side of the unit it lies on, by its label against theirs.
+ */
+function compassName(p, name, used) {
+  const same = provinces.filter((q) => q.adminName === p.adminName);
+  const cx = same.reduce((sum, q) => sum + q.label[0], 0) / same.length;
+  const cy = same.reduce((sum, q) => sum + q.label[1], 0) / same.length;
+  const dx = p.label[0] - cx;
+  const dy = p.label[1] - cy;
+  const side = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'East' : 'West') : dy > 0 ? 'South' : 'North';
+  for (const word of [side, 'Upper', 'Lower', 'Inner', 'Outer', 'Far']) {
+    if (!used.has(`${word} ${name}`)) return `${word} ${name}`;
+  }
+  return name;
+}
+
+// Names: the biggest city, as it was called in the map's own scenario.
 for (const p of provinces) {
   p.baseName = (p.city ?? p.name).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
   p.adminName = p.name;
 }
-pickNames(cfg.RENAME).forEach((name, i) => (provinces[i].name = name));
+pickNames(cfg.RENAME ?? {}).forEach((name, i) => (provinces[i].name = name));
 
 // Sea links, then make sure nothing is cut off.
 for (const [a, b, label] of cfg.SEA_LINKS) {
@@ -492,6 +606,15 @@ for (const [a, b, label] of cfg.SEA_LINKS) {
   pa.sea.add(pb.id);
   pb.sea.add(pa.id);
 }
+// Coasts on the same sea zone, or on neighbouring ones, are within a turn's
+// sail of each other: islands reached that way are not cut off.
+const zoneData = seaZones();
+const onZone = (zoneData.seas ?? []).map(() => []);
+zoneData.coast.forEach((zones, id) => zones.forEach((z) => onZone[z].push(id)));
+const bySea = provinces.map((p) => {
+  const reach = new Set(zoneData.coast[p.id].flatMap((z) => [z, ...zoneData.seas[z].adj]));
+  return [...reach].flatMap((z) => onZone[z]);
+});
 const component = () => {
   const comp = new Array(provinces.length).fill(-1);
   let count = 0;
@@ -501,7 +624,7 @@ const component = () => {
     comp[start.id] = count;
     while (queue.length) {
       const p = provinces[queue.pop()];
-      for (const n of [...p.adj, ...p.sea]) {
+      for (const n of [...p.adj, ...p.sea, ...bySea[p.id]]) {
         if (comp[n] < 0) {
           comp[n] = count;
           queue.push(n);
@@ -538,7 +661,7 @@ for (;;) {
 
 const mapJson = {
   version: 1,
-  name: 'europe',
+  name: MAP_NAME,
   width: MAP_W,
   height: MAP_H,
   scale: SCALE,
@@ -560,9 +683,9 @@ const mapJson = {
 mapJson.build = createHash('sha1').update(JSON.stringify(mapJson)).digest('hex').slice(0, 10);
 // Sea zones come after the build id: they never move a province, so saves
 // made before them stay good.
-Object.assign(mapJson, seaZones());
+Object.assign(mapJson, zoneData);
 const mapText = JSON.stringify(mapJson);
-writeFileSync(path.join(root, 'assets/map/europe.json'), mapText);
+writeFileSync(path.join(root, `assets/map/${MAP_NAME}.json`), mapText);
 
 // ---------------------------------------------------------------- sea zones
 /**
@@ -573,9 +696,8 @@ writeFileSync(path.join(root, 'assets/map/europe.json'), mapText);
  * shores of lakes lie on inner rings and are left out.
  */
 function seaZones() {
-  const zones = cfg.SEAS;
+  const zones = cfg.SEAS ?? [];
   const zoneIndex = new Map(zones.map((z, i) => [z.name, i]));
-  const toLonLat = ([x, y]) => [cfg.BBOX.w + (x / MAP_W) * (cfg.BBOX.e - cfg.BBOX.w), mercLat(Y1 - y * UNIT)];
   const km = ([lon1, lat1], [lon2, lat2]) => {
     const rad = Math.PI / 180;
     const a = Math.sin(((lat2 - lat1) * rad) / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
@@ -596,11 +718,11 @@ function seaZones() {
           if (onEdge(arc[i])) continue;
           const at = toLonLat(arc[i]);
           let best = -1;
-          let bestKm = cfg.SEA_REACH_KM;
+          let bestKm = Infinity;
           zones.forEach((z, zi) => {
             for (const point of z.points) {
               const d = km(at, point);
-              if (d < bestKm) {
+              if (d < bestKm && d <= (z.reach ?? cfg.SEA_REACH_KM)) {
                 bestKm = d;
                 best = zi;
               }
@@ -634,8 +756,8 @@ function seaZones() {
 /**
  * Writes scenario [sc] on the finished provinces. [ownerOf] gives a
  * province's owner tag, [developmentOf] its development factor, and [names]
- * the province names when they differ from the map's (1914) ones. Returns
- * the province list for the report and the capitals.
+ * the province names when they differ from the map's ones. Returns the
+ * province list for the report and the capitals.
  */
 function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
   const id = sc.SCENARIO_META.id;
@@ -647,6 +769,7 @@ function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
   const nameOf = (p) => names?.[p.id] ?? p.name;
   const owners = provinces.map((p) => nation(ownerOf(p), `the owner of ${p.name}`));
   const income = provinces.map((p) => incomeFor(p, developmentOf(p)));
+  const colors = autoColors(sc, owners);
   const capitals = sc.NATIONS.map((n) => {
     const p = locate(n.capital, `${id}: capital of ${n.tag}`, 40);
     if (ownerOf(p) !== n.tag) throw new Error(`${id}: capital of ${n.tag} lands in ${nameOf(p)}, owned by ${ownerOf(p)}`);
@@ -660,23 +783,27 @@ function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
   const json = {
     version: 1,
     ...sc.SCENARIO_META,
-    map: 'europe',
+    map: MAP_NAME,
     mapBuild: mapJson.build,
     nations: sc.NATIONS.map((n, i) => ({
       tag: n.tag,
       name: n.name,
       short: n.short,
-      color: n.color,
+      color: colors[i],
       capital: capitals[i],
       readiness: n.ready ?? sc.DEFAULT_READY ?? 1,
       tech: n.tech ?? sc.DEFAULT_TECH ?? [0, 0],
       flag: n.flag ?? '',
+      ...(n.wild ? { wild: true } : {}),
+      ...(n.aggression !== undefined ? { aggression: n.aggression } : {}),
     })),
     owners,
     income,
     ...(names ? { names } : {}),
     wars: pairs(sc.WARS, 'a war'),
     alliances: pairs(sc.ALLIANCES, 'an alliance'),
+    guarantees: pairs(sc.GUARANTEES, 'a guarantee'),
+    pacts: pairs(sc.PACTS, 'a pact'),
     forts: provinces.map((p) => forts[nameOf(p)] ?? 0),
     history: historyJson(sc, index),
   };
@@ -695,6 +822,31 @@ function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
   return { lines, capitals };
 }
 
+/**
+ * The nations' colours, with those marked 'auto' taken from sc.PALETTE: a
+ * colour no neighbour has yet, overland or across a strait, the least used
+ * one when there is a choice.
+ */
+function autoColors(sc, owners) {
+  const colors = sc.NATIONS.map((n) => n.color);
+  if (!colors.includes('auto')) return colors;
+  const touches = sc.NATIONS.map(() => new Set());
+  for (const p of provinces) {
+    for (const q of [...p.adj, ...p.sea]) {
+      if (owners[p.id] !== owners[q]) touches[owners[p.id]].add(owners[q]);
+    }
+  }
+  const used = new Map();
+  sc.NATIONS.forEach((n, i) => {
+    if (n.color !== 'auto') return;
+    const taken = new Set([...touches[i]].map((j) => colors[j]));
+    const free = sc.PALETTE.filter((c) => !taken.has(c));
+    colors[i] = (free.length ? free : sc.PALETTE).reduce((best, c) => ((used.get(c) ?? 0) < (used.get(best) ?? 0) ? c : best));
+    used.set(colors[i], (used.get(colors[i]) ?? 0) + 1);
+  });
+  return colors;
+}
+
 /** Scripted events, with dates turned into turns and tags into nation ids. */
 function historyJson(sc, index) {
   const id = (tag) => {
@@ -708,45 +860,60 @@ function historyJson(sc, index) {
       turn,
       text: h.text,
       alliances: (h.alliances ?? []).map(([a, b]) => [id(a), id(b)]),
+      breaks: (h.breaks ?? []).map(([a, b]) => [id(a), id(b)]),
+      guarantees: (h.guarantees ?? []).map(([a, b]) => [id(a), id(b)]),
+      pacts: (h.pacts ?? []).map(([a, b]) => [id(a), id(b)]),
       wars: (h.wars ?? []).map(([a, b]) => [id(a), id(b)]),
     };
   });
 }
 
-// The Great War: owners, names and income as the map was built for them.
-const great = writeScenario(cfg, { ownerOf: (p) => p.owner, developmentOf: (p) => cfg.DEVELOPMENT[p.modern] ?? 1 });
-const capitals = great.capitals;
+// The map's own scenario, when its config is one (1914 for Europe): owners,
+// names and income as the map was built for them.
+const written = [];
+if (cfg.SCENARIO_META) written.push([cfg, writeScenario(cfg, { ownerOf: (p) => p.owner, developmentOf: (p) => cfg.DEVELOPMENT[p.modern] ?? 1 })]);
 
-// Europe today: owners from each province's modern country (bar a few set by
-// 1914 province name), names from the largest city in today's spelling,
-// income from today's development. Forts take today's names.
-for (const name of Object.keys(modernCfg.OWNER_BY_PROVINCE)) {
-  if (!provinces.some((p) => p.name === name)) throw new Error(`modern owner for ${name}: no such province`);
+// Every other scenario assigns the finished provinces through its ownerOf
+// and developmentOf (both given a province with its map name, owner key,
+// modern group and lonLat). Its names: from RENAME over the biggest cities
+// in today's spelling, or MAP_RENAME over the map's own names, or the map's.
+for (const file of MAPS[mapArg].scenarios) {
+  const sc = await import(file);
+  for (const name of Object.keys(sc.OWNER_BY_PROVINCE ?? {})) {
+    if (!provinces.some((p) => p.name === name)) throw new Error(`${sc.SCENARIO_META.id}: owner for ${name}: no such province`);
+  }
+  for (const name of Object.keys(sc.MAP_RENAME ?? {})) {
+    if (!provinces.some((p) => p.name === name)) throw new Error(`${sc.SCENARIO_META.id}: rename of ${name}: no such province`);
+  }
+  const names = sc.RENAME ? pickNames(sc.RENAME) : sc.MAP_RENAME ? provinces.map((p) => sc.MAP_RENAME[p.name] ?? p.name) : null;
+  written.push([sc, writeScenario(sc, { ownerOf: sc.ownerOf, developmentOf: sc.developmentOf, names })]);
 }
-const modernOwner = (p) => modernCfg.OWNER_BY_PROVINCE[p.name] ?? p.modern;
-const modern = writeScenario(modernCfg, {
-  ownerOf: modernOwner,
-  developmentOf: (p) => modernCfg.DEVELOPMENT[modernOwner(p)] ?? 1,
-  names: pickNames(modernCfg.RENAME),
-});
 
-writeFileSync(path.join(root, 'assets/scenarios/index.json'), JSON.stringify([cfg.SCENARIO_META.id, modernCfg.SCENARIO_META.id]));
+// Every scenario file of every map, in the order they are offered.
+const onDisk = SCENARIO_ORDER.filter((id) => existsSync(path.join(root, `assets/scenarios/${id}.json`)));
+writeFileSync(path.join(root, 'assets/scenarios/index.json'), JSON.stringify(onDisk));
 
 // ---------------------------------------------------------------- report
 const points = arcsQ.reduce((s, a) => s + a.length / 2, 0);
 console.log(`  ${provinces.length} provinces, ${arcsQ.length} arcs, ${points} points, map ${MAP_W}x${MAP_H}, ${(mapText.length / 1024).toFixed(0)} KB, build ${mapJson.build}`);
-writeFileSync(out('provinces.txt'), great.lines.join('\n'));
-writeFileSync(out('provinces_modern.txt'), modern.lines.join('\n'));
-console.log(great.lines.filter((l) => !l.startsWith(' ')).join('\n'));
+for (const [sc, report] of written) {
+  const id = sc.SCENARIO_META.id;
+  writeFileSync(out(id === '1914' ? 'provinces.txt' : `provinces_${id}.txt`), report.lines.join('\n'));
+}
+const [firstScenario, first] = written[0];
+const capitals = first.capitals;
+console.log(first.lines.filter((l) => !l.startsWith(' ')).join('\n'));
 
 // ---------------------------------------------------------------- previews
-const color = new Map(cfg.NATIONS.map((n) => [n.tag, n.color]));
+// Coloured as the first scenario has them.
+const color = new Map(firstScenario.NATIONS.map((n) => [n.tag, n.color]));
+const ownerTag = firstScenario === cfg ? (p) => p.owner : firstScenario.ownerOf;
 function preview(file, [vx, vy, vw, vh], px, withNames) {
   const parts = [`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${vw} ${vh}"><rect x="${vx}" y="${vy}" width="${vw}" height="${vh}" fill="#9db7c4"/>`];
   const sw = vw / px;
   for (const p of provinces) {
     const d = p.rings.map((ring) => `M${ring.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join('L')}Z`).join('');
-    parts.push(`<path d="${d}" fill="${color.get(p.owner)}" fill-rule="evenodd" stroke="#2b2b2b" stroke-width="${sw * 0.8}"/>`);
+    parts.push(`<path d="${d}" fill="${color.get(ownerTag(p))}" fill-rule="evenodd" stroke="#2b2b2b" stroke-width="${sw * 0.8}"/>`);
   }
   for (const p of provinces) {
     for (const s of p.sea) {
@@ -769,9 +936,13 @@ function preview(file, [vx, vy, vw, vh], px, withNames) {
   writeFileSync(out(file), png);
 }
 preview('preview_full.png', [0, 0, MAP_W, MAP_H], 1500, false);
-preview('preview_west.png', [0, MAP_H * 0.42, MAP_W * 0.5, MAP_H * 0.5], 1700, true);
-preview('preview_central.png', [MAP_W * 0.3, MAP_H * 0.4, MAP_W * 0.45, MAP_H * 0.42], 1700, true);
-preview('preview_east.png', [MAP_W * 0.5, MAP_H * 0.05, MAP_W * 0.5, MAP_H * 0.5], 1700, true);
-preview('preview_south.png', [MAP_W * 0.45, MAP_H * 0.6, MAP_W * 0.55, MAP_H * 0.4], 1700, true);
-preview('preview_north.png', [MAP_W * 0.15, 0, MAP_W * 0.5, MAP_H * 0.45], 1700, true);
+for (const [file, box] of Object.entries(cfg.PREVIEWS ?? {
+  'preview_west.png': [0, 0.42, 0.5, 0.5],
+  'preview_central.png': [0.3, 0.4, 0.45, 0.42],
+  'preview_east.png': [0.5, 0.05, 0.5, 0.5],
+  'preview_south.png': [0.45, 0.6, 0.55, 0.4],
+  'preview_north.png': [0.15, 0, 0.5, 0.45],
+})) {
+  preview(file, [MAP_W * box[0], MAP_H * box[1], MAP_W * box[2], MAP_H * box[3]], 1700, true);
+}
 console.log('done');

@@ -34,18 +34,34 @@ move at the same moment when the turn ends.
 
 ## Features
 
-- **A real map.** 327 provinces cut from Natural Earth data and redrawn to
-  the borders of 1914: Alsace-Lorraine is German, Galicia is Austrian,
-  Congress Poland is Russian, Libya is Italian.
-- **Two scenarios on it.** *The Great War* opens in August 1914 with 23
-  nations, the wars of that month already declared, the Entente and the
-  Central Powers bound by treaty and the great fortresses manned. *Europe
-  today* opens in January 2026 with 58 nations at peace, NATO bound together
-  and the AI slow to start wars: the player sets the pace.
-- **History, if it still fits.** In 1914 the Ottomans, Italy, Bulgaria,
-  Romania and Greece enter the war in the months they did, as long as the
-  game still looks enough like history for it to make sense. A player's
-  nation is never pushed into a war; it is offered the alliance instead.
+- **Two real maps.** Europe, with the Middle East and North Africa: 327
+  provinces cut from Natural Earth data and redrawn to the borders of 1914.
+  North America, from Alaska to Panama: 256 provinces built from the US
+  counties and the provinces and states of its neighbours, never crossing a
+  state line, with the Great Lakes as seas of their own.
+- **Seven scenarios.**
+  - *The Great War* (August 1914): 23 nations, the wars of that month
+    already declared, the Entente and the Central Powers bound by treaty.
+  - *Road to war* (July 1936): the Spanish Civil War has just begun, and
+    the Axis, the Anschluss, Munich, the Molotov–Ribbentrop pact and the
+    invasions of 1939–41 follow on their dates if they still can.
+  - *Europe today* (January 2026): 58 nations at peace, NATO bound together
+    and the AI slow to start wars.
+  - *The American Revolution* (July 1776): thirteen colonies against the
+    Crown; Spain and France join later. West of the mountains the land
+    belongs to its own nations, and beyond them lies unclaimed land.
+  - *The Civil War* (April 1861): Union against Confederacy, with Britain,
+    Spain and Mexico watching.
+  - *Fifty states* (January 2026): every US state and Canadian province a
+    nation of its own.
+  - *North America today* (January 2026): the continent at peace.
+- **History, if it still fits.** Scripted wars, alliances and pacts happen
+  on their dates, as long as the game still looks enough like history for
+  them to make sense. A player's nation is never pushed into a war; it is
+  offered the alliance instead.
+- **Unclaimed land.** Some scenarios leave land no nation rules. No war is
+  needed to take it, but its people fight back hard, and settling it takes
+  time.
 - **Simultaneous turns.** Everyone's orders resolve at once. Reinforcements
   arrive before attacks, and an army that marches away no longer defends.
   Each turn then plays out on the map: armies march, ships sail, battles
@@ -57,7 +73,9 @@ move at the same moment when the turn ends.
   one; declare war on a nation and its allies declare war on you in the same
   turn. Every nation feels something about you, from -100 to +100: send
   envoys and gifts to win it over, sign a non-aggression pact to keep a
-  neighbour quiet while you fight elsewhere.
+  neighbour quiet while you fight elsewhere, or guarantee a small nation's
+  independence and go to war with whoever attacks it. At war, call your
+  allies to arms; they may call on you too.
 - **Peace on terms.** Ask for nothing, for reparations (a quarter of the
   loser's income for two years) or for vassalage. A vassal pays tribute,
   fights its overlord's wars and may one day declare its independence.
@@ -78,8 +96,21 @@ move at the same moment when the turn ends.
 - **Statistics.** Provinces, armies and income of the leading powers over
   the whole game, as charts you can read month by month.
 - **Flags** for every nation of both scenarios, drawn in code.
-- **Your game, your rules.** Three lengths, three difficulties (the AI earns
-  80%, 100% or 125%), fog of war on or off, random events on or off.
+- **Your game, your rules.** Win with 30%, 40%, 60%, 75% or all of the map,
+  or set no victory and play on for as long as you like. A turn can be a
+  month, a season or a year, so a game can run for centuries. Three
+  difficulties: on Easy the AI earns 80%, leaves you alone for your first
+  three years and looks for other prey first; on Hard it earns 125% and
+  comes for you as for anyone. Fog of war, random events.
+- **Any nation can win.** Small nations survive by alliances, pacts,
+  guarantees and calls to arms, and grow through vassals and their allies'
+  wars. `tool/underdog.dart` measures it: played by the AI itself, Italy
+  wins 1914 in about one game in six and Colorado wins Fifty states in one
+  in five, and small nations such as Sweden in 1936 sometimes reach victory.
+- **Nations with a temper.** Each scenario sets how warlike every nation
+  is: in 1936 most of Europe wants peace and keeps its treaties, and the
+  great war comes as history brings it; Spain in 1776 and the neighbours of
+  the fifty states rarely start wars of their own.
 - **An AI for every nation.** It holds its fronts, attacks what it can
   overwhelm (overland or from the sea), gathers its army when it cannot,
   seeks allies against a shared threat, signs pacts to cover a flank, courts
@@ -93,7 +124,7 @@ move at the same moment when the turn ends.
   right thumb.
 
 Not in the game yet: fleets and naval battles, trading provinces at the
-peace table, sound, other maps.
+peace table, sound, a world map.
 
 ## Install
 
@@ -107,8 +138,9 @@ older one and keeps your saved games.
 
 ## How to play
 
-1. **Pick a scenario and a nation** by tapping it on the map, set the length,
-   difficulty, fog of war and random events, and start.
+1. **Pick a scenario and a nation** by tapping it on the map, open the game
+   settings to choose the victory, the length of a turn, the difficulty, fog
+   of war and random events, and start.
 2. **Give orders.** Tap one of your provinces to recruit, build or move its
    units: to a neighbouring province, or to any province of yours further off
    for a march of several turns. Moving into a province of a nation you are
@@ -129,11 +161,14 @@ older one and keeps your saved games.
 | Peace terms | A peace offer can ask for reparations (25% of the loser's income for 24 turns) or vassalage (20% of its income for good, and its wars are the overlord's). Peace is signed when one side accepts what the other asks. |
 | Relations | From -100 to +100. War sours them, alliances warm them, peace lets them drift back to 0. An envoy gives +8 for half the receiver's income; a gift of a turn of their income gives +10, at most +30. At +60 a nation accepts an alliance even without a common enemy. |
 | Pacts | A non-aggression pact needs both sides and lasts 36 turns: neither may declare war on the other, nor join a war against it through an alliance. |
+| Guarantees | One-sided: the guarantor joins any war declared on the guaranteed nation, which is not bound to the guarantor's wars. It ends if the two go to war. |
+| Call to arms | At war, ask your allies to join; each decides for itself, by how it feels about you and the odds. The call stands for three turns. |
 | Events | Each turn a nation has about one chance in six that something happens, more at war. A choice is answered with the next turn's orders; no answer takes the course that costs nothing. |
 | Building | One project per province a turn. A fort level costs 40 gold times the level and 1 gold a turn; a province falls with one level less. Development adds 1 income for 20 gold, 15 more for each further level, up to 5. |
 | Research | A share of income (0 to 50%) goes into army or industry. A level costs 2 turns of income times the level reached. Army: +5% strength a level. Industry: +4% income a level. |
 | Conquest | Land taken from its owner at the start yields 50% of its income, rising to all of it over 24 turns. Until then, held with fewer units than its militia, it may revolt. |
-| Winning | Hold the chosen share of all provinces, your vassals' included. Lose your last province and the game is over. |
+| Unclaimed land | Taken without a war by moving in; its people defend it four times as hard as a militia. |
+| Winning | Hold the chosen share of all provinces, your vassals' included, or play with no victory at all. Lose your last province and the game is over. |
 
 The same rules are in the game under **How to play**.
 
@@ -181,7 +216,8 @@ flutter build apk --release
 |---|---|
 | `flutter analyze` | Static analysis. Must report no issues. |
 | `flutter test` | Rules, saves, map geometry, camera, UI flows, headless games. |
-| `dart run tool/sim.dart 300 1` | Plays AI against AI for 300 turns with seed 1 and prints the standings. Use it to judge a balance change. Further arguments: win share, report interval, scenario (`dart run tool/sim.dart 300 1 0.95 25 modern`). |
+| `dart run tool/underdog.dart 1914 SER,BUL 12` | Plays the listed nations in the player's seat with the AI, over 12 seeds, and reports how often each survives and wins. Further arguments: turns, win share, difficulty. |
+| `dart run tool/sim.dart 300 1` | Plays AI against AI for 300 turns with seed 1 and prints the standings. Use it to judge a balance change. Further arguments: win share, report interval, scenario, and `events` or anything else to switch random events on or off (`dart run tool/sim.dart 300 1 0.95 25 america1776 events`). |
 | `tool/emu.sh install release` | Builds the APK and installs it over adb. |
 | `tool/emu.sh start` / `shot f.png` / `tap x y` / `log` | Drives the installed app on an emulator or phone. Run `tool/emu.sh` alone for the full list. |
 
@@ -209,10 +245,13 @@ lib/
               statistics, dispatches; flags.dart draws every flag
   theme.dart  Colours, fonts and text styles
 assets/
-  map/europe.json         province shapes, adjacency and sea zones      (generated)
+  map/europe.json         Europe: province shapes, adjacency, sea zones  (generated)
+  map/america.json        North America, the same                       (generated)
   scenarios/1914.json     The Great War: nations, owners, income, wars,
                           alliances, forts, technology, history          (generated)
+  scenarios/1936.json     Road to war, on the European provinces         (generated)
   scenarios/modern.json   Europe today, on the same provinces            (generated)
+  scenarios/america*.json the North American scenarios                   (generated)
   scenarios/index.json    the scenarios the game offers, in order        (generated)
   fonts/                  Old Standard, Barlow Condensed
 tool/
@@ -254,7 +293,9 @@ Where to make common changes:
 | How a turn resolves | `lib/engine/resolve.dart`, tests in `test/engine/resolve_test.dart` |
 | How the AI plays | `lib/engine/ai.dart`, then `dart run tool/sim.dart` over several seeds |
 | Who owns what in 1914, province names, colours, starting wars and alliances, forts, technology, history, sea links | `tool/map/config/scenario_1914.mjs`, then rebuild the map |
-| Europe today: nations, colours, alliances, development, names | `tool/map/config/scenario_modern.mjs`, then rebuild the map |
+| 1936 and Europe today: nations, colours, alliances, development, names, history | `tool/map/config/scenario_1936.mjs`, `scenario_modern.mjs`, then rebuild the map |
+| The North American map: window, province counts, sea zones, straits | `tool/map/config/america_map.mjs`, then `node build_map.mjs --map=america` |
+| The North American scenarios | `tool/map/config/america_*.mjs` (`america_states.mjs` holds the states and their flags) |
 | How the map is drawn | `lib/map/map_painters.dart`, `lib/map/map_scene.dart` |
 | A screen or sheet | `lib/ui/` |
 | Colours and type | `lib/theme.dart` |
@@ -275,32 +316,41 @@ cd tool/map
 npm install
 ```
 
-Download two datasets from
+Download these datasets from
 [Natural Earth](https://www.naturalearthdata.com/downloads/10m-cultural-vectors/)
-(or directly from `https://naciscdn.org/naturalearth/10m/cultural/`) and unzip
-each into its own folder:
+(or directly from `https://naciscdn.org/naturalearth/10m/cultural/` and
+`.../10m/physical/`) and unzip each into its own folder:
 
-| Dataset | Unzip into |
-|---|---|
-| `ne_10m_admin_1_states_provinces.zip` | `tool/map/raw/admin1/` |
-| `ne_10m_populated_places_simple.zip` | `tool/map/raw/places/` |
+| Dataset | Unzip into | Needed for |
+|---|---|---|
+| `ne_10m_admin_1_states_provinces.zip` | `tool/map/raw/admin1/` | both maps |
+| `ne_10m_populated_places_simple.zip` | `tool/map/raw/places/` | both maps |
+| `ne_10m_admin_2_counties.zip` | `tool/map/raw/counties/` | North America |
+| `ne_10m_lakes.zip` (physical) | `tool/map/raw/lakes/` | North America |
 
 Then:
 
 ```sh
-node build_map.mjs            # add --fresh after changing the map window
+node build_map.mjs                  # Europe; add --fresh after changing the map window
+node build_map.mjs --map=america    # North America
 ```
 
-The script clips the data to the game window, assigns every unit its 1914
-owner, merges about two thousand units into 327 provinces, never across a
-1914 border and, but for a few small territories, never across a modern one,
-simplifies the outlines, works out adjacency, and writes
-`assets/map/europe.json`, `assets/scenarios/1914.json` and
-`assets/scenarios/modern.json`. So today's borders fit the same provinces; the
-few provinces that mix two countries at this scale are assigned by hand in
-the modern config. It also renders
-previews and province lists to `tool/map/out/`; look at them before
-committing.
+For Europe the script clips the data to the game window, assigns every unit
+its 1914 owner, merges about two thousand units into 327 provinces, never
+across a 1914 border and, but for a few small territories, never across a
+modern one, simplifies the outlines, works out adjacency, and writes
+`assets/map/europe.json` and the 1914, 1936 and modern scenarios. So later
+borders fit the same provinces; the few provinces that mix two countries at
+this scale are assigned by hand in each scenario's config.
+
+For North America it takes the US counties and the admin-1 units of
+Canada, Mexico, Central America and the Caribbean, cuts Canada's huge
+provinces on a grid, erases the big lakes, merges everything into 256
+provinces that never cross a state, province or country, and writes
+`assets/map/america.json` and its four scenarios. Each run also rewrites
+`assets/scenarios/index.json` with every scenario on disk. Both render
+previews and province lists to `tool/map/out/` (`out/america/`); look at them
+before committing.
 
 Province ids are positions in the generated file. Changing how provinces are
 merged changes the map's build id, and saves made on the old map are then

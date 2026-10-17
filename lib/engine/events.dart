@@ -18,8 +18,19 @@ enum EventKind {
   independence,
 
   /// [GameEvent.a] went to war with [GameEvent.b] because [GameEvent.b]
-  /// declared war on [GameEvent.n1], an ally of [GameEvent.a].
+  /// declared war on [GameEvent.n1], an ally of [GameEvent.a], or, when
+  /// [GameEvent.flag], a nation whose independence [GameEvent.a]
+  /// guaranteed.
   calledToArms,
+
+  /// [GameEvent.a] called on its allies to join its war on [GameEvent.b].
+  armsCalled,
+
+  /// [GameEvent.a] guaranteed the independence of [GameEvent.b].
+  guaranteeGiven,
+
+  /// [GameEvent.a] withdrew its guarantee of [GameEvent.b]'s independence.
+  guaranteeRevoked,
 
   /// [GameEvent.a] and [GameEvent.b] signed an alliance.
   allianceSigned,

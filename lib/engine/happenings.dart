@@ -78,12 +78,12 @@ void rollHappenings(Game g, Rng rng, List<GameEvent> events) {
   final s = g.state;
   final neighbors = g.neighborsOfAll();
   for (var n = 0; n < s.alive.length; n++) {
-    if (!s.alive[n] || s.pending.containsKey(n)) continue;
+    if (!s.alive[n] || s.pending.containsKey(n) || g.world.isWild(n)) continue;
     final mine = g.provincesOf(n);
     final atWar = s.wars.any((key) => key >> 8 == n || key & 0xFF == n);
     final rivals = [
       for (final m in neighbors[n].toList()..sort())
-        if (!g.atWar(n, m)) m,
+        if (!g.atWar(n, m) && !g.world.isWild(m)) m,
     ];
     for (final h in Happening.values) {
       final possible = switch (h) {
@@ -238,7 +238,7 @@ int _provinceFor(Game g, Happening h, int n, List<int> mine, Rng rng) {
 int _visitor(Game g, int n, Rng rng) {
   final courts = [
     for (var m = 0; m < g.state.alive.length; m++)
-      if (m != n && g.state.alive[m] && !g.atWar(n, m)) m,
+      if (m != n && g.state.alive[m] && !g.atWar(n, m) && !g.world.isWild(m)) m,
   ];
   return courts.isEmpty ? -1 : courts[rng.nextInt(courts.length)];
 }

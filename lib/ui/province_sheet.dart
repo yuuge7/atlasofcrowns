@@ -67,6 +67,7 @@ class ProvinceSheet extends StatelessWidget {
     };
     final seat = '${capital ? ', capital' : ''}$fort';
     if (mine) return 'Yours$seat';
+    if (c.world.isWild(owner)) return 'Unclaimed land';
     final lord = c.game.overlordOf(owner);
     final name = '${c.world.nations[owner].name}${lord >= 0 && lord != c.human ? ', vassal of ${c.world.nations[lord].shortName}' : ''}';
     if (!c.commanding) return '$name$seat';
@@ -76,6 +77,7 @@ class ProvinceSheet extends StatelessWidget {
       Relation.ally => '$name$seat. Your ally',
       Relation.truce => '$name$seat. Truce, ${c.game.truceLeft(c.human, owner)} more turns',
       Relation.pact => '$name$seat. Pact, ${c.game.pactLeft(c.human, owner)} more turns',
+      Relation.wild => 'Unclaimed land',
       Relation.peace || Relation.you => '$name$seat. At peace with you',
     };
   }
@@ -365,6 +367,15 @@ class _ForeignProvince extends StatelessWidget {
     final owner = c.state.owner[c.selected];
     final name = c.world.nations[owner].shortName;
     if (!c.commanding) return _Stats(c);
+    if (c.world.isWild(owner)) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+        _Stats(c),
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text('Nobody rules here yet. Its people defend it, twice as hard as a militia, but no war is needed: move an army in from next door to take it.', style: AtlasText.note),
+        ),
+      ]);
+    }
 
     final actions = <Widget>[];
     String? note;
@@ -394,6 +405,13 @@ class _ForeignProvince extends StatelessWidget {
         note = '${said ?? 'To attack, select one of your provinces next to this one and choose Move.'} $score';
         final proposing = !c.orders.offerPeace.contains(owner) && theirs == null && !c.game.hasPeaceOffer(c.human, owner);
         actions.add(proposing ? OutlinedButton(onPressed: () => _choosePeace(context, owner), child: const Text('OFFER PEACE')) : button);
+        if (c.orders.callToArms.contains(owner)) {
+          actions.add(OutlinedButton(onPressed: () => c.setArmsCalled(owner, false), child: const Text('CALL IT OFF')));
+        } else if (c.game.hasArmsCall(c.human, owner)) {
+          actions.add(const OutlinedButton(onPressed: null, child: Text('ALLIES CALLED')));
+        } else if (c.game.canCallToArms(c.human, owner)) {
+          actions.add(FilledButton(onPressed: () => c.setArmsCalled(owner, true), child: const Text('CALL ALLIES')));
+        }
       case Relation.bound:
         if (c.game.overlordOf(owner) == c.human) {
           note = 'Your vassal pays you ${(Rules.vassalTribute * 100).round()}% of its income and fights your wars.';
@@ -416,7 +434,7 @@ class _ForeignProvince extends StatelessWidget {
           note = 'Allies: if either of you is attacked, the other joins the war.';
           actions.add(OutlinedButton(onPressed: () => _confirmLeave(context, owner), child: const Text('LEAVE THE ALLIANCE')));
         }
-      case Relation.truce || Relation.pact || Relation.peace || Relation.you:
+      case Relation.truce || Relation.pact || Relation.peace || Relation.you || Relation.wild:
         if (c.orders.declareWar.contains(owner)) {
           note = 'War on $name begins at the end of the turn. Your armies may cross the border from next turn.';
           actions.add(OutlinedButton(onPressed: () => c.setWarDeclared(owner, false), child: const Text('CALL IT OFF')));
@@ -567,8 +585,8 @@ class _ForeignProvince extends StatelessWidget {
     final names = [for (final d in c.game.wouldDefend(c.human, owner)) c.world.nations[d].shortName];
     final allies = switch (names.length) {
       0 => '',
-      1 => ' Its ally ${names.single} will join the war against you.',
-      _ => ' Its allies ${names.sublist(0, names.length - 1).join(', ')} and ${names.last} will join the war against you.',
+      1 => ' ${names.single} will come to its aid and join the war against you.',
+      _ => ' ${names.sublist(0, names.length - 1).join(', ')} and ${names.last} will come to its aid and join the war against you.',
     };
     final army = c.armyOf(owner);
     final sure = await confirm(

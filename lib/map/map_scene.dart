@@ -144,6 +144,8 @@ class MapScene extends ChangeNotifier {
       }
     }
     for (final entry in best.entries) {
+      // Unclaimed land goes unnamed.
+      if (world.isWild(entry.key)) continue;
       var cx = 0.0, cy = 0.0, total = 0.0;
       var box = Rect.fromCircle(center: geometry.provinces[entry.value.first].label, radius: 1);
       for (final p in entry.value) {

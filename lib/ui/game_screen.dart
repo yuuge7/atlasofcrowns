@@ -100,7 +100,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     final focus = _c.mode == InputMode.moveAmount ? _c.moveTarget : _c.selected;
     if (focus != _revealed || bottom > _revealedAbove) {
       _revealed = focus;
-      if (focus >= 0) _c.camera.reveal(_c.assets.geometry.provinces[focus].label);
+      if (focus >= 0) _c.camera.reveal(_c.geometry.provinces[focus].label);
     }
     _revealedAbove = bottom;
   }
@@ -130,7 +130,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
       return;
     }
     if (_c.pendingHappening != null && _c.orders.answer == null) await showHappening(context, _c);
-    if (mounted && Dispatches(_c.lastReport!, _c.world, _c.human).yours.isNotEmpty) showDispatches(context, _c);
+    if (mounted && Dispatches(_c.lastReport!, _c.world, _c.human, allies: _c.allies).yours.isNotEmpty) showDispatches(context, _c);
   }
 
   Future<void> _showGameOver() async {
@@ -140,11 +140,11 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     final String carryOn;
     if (s.winner >= 0 && s.winner == s.human) {
       title = 'Victory';
-      body = 'You hold ${_c.game.realmCount(s.human)} of ${_c.world.provinces.length} provinces${_withVassals(s.human)}. The war is yours, ${_c.world.dateLabel(s.turn)}.';
+      body = 'You hold ${_c.game.realmCount(s.human)} of ${_c.world.provinces.length} provinces${_withVassals(s.human)}. The war is yours, ${_c.game.dateLabel(s.turn)}.';
       carryOn = 'KEEP PLAYING';
     } else if (s.winner < 0) {
       title = 'Defeat';
-      body = 'Your last province fell in ${_c.world.dateLabel(s.turn - 1)}. ${_c.world.nations[s.human].name} is no more.';
+      body = 'Your last province fell in ${_c.game.dateLabel(s.turn - 1)}. ${_c.world.nations[s.human].name} is no more.';
       carryOn = 'WATCH THE WAR GO ON';
     } else {
       final winner = _c.world.nations[s.winner];
@@ -184,7 +184,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
     final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('${_c.world.dateLabel(_c.state.turn)}, turn ${_c.state.turn + 1}'),
+        title: Text('${_c.game.dateLabel(_c.state.turn)}, turn ${_c.state.turn + 1}'),
         contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           FilledButton(onPressed: () => Navigator.pop(context), child: const Text('BACK TO THE MAP')),
@@ -207,7 +207,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
         final messenger = ScaffoldMessenger.of(context);
         try {
           await _c.saves.saveNew(_c.game, _c.orders, marches: _c.marchesToJson);
-          messenger.showSnackBar(SnackBar(content: Text('Game saved: ${_seat()}, ${_c.world.dateLabel(_c.state.turn)}.')));
+          messenger.showSnackBar(SnackBar(content: Text('Game saved: ${_seat()}, ${_c.game.dateLabel(_c.state.turn)}.')));
         } on Object catch (e) {
           messenger.showSnackBar(SnackBar(content: Text('The game could not be saved: $e')));
         }
@@ -239,7 +239,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
         _c,
         onLocate: (province) {
           Navigator.pop(sheet);
-          _c.camera.centerOn(_c.assets.geometry.provinces[province].label);
+          _c.camera.centerOn(_c.geometry.provinces[province].label);
           _c.tapProvince(province);
         },
         onStatistics: () {
@@ -253,7 +253,7 @@ class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, 
   @override
   Widget build(BuildContext context) {
     final c = _c;
-    final focus = c.commanding ? c.assets.geometry.provinces[c.state.capital[c.human]].label : null;
+    final focus = c.commanding ? c.geometry.provinces[c.state.capital[c.human]].label : null;
     final safeBottom = MediaQuery.paddingOf(context).bottom;
     return PopScope(
       canPop: false,
@@ -335,7 +335,7 @@ class _TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = controller;
-    final date = c.world.dateLabel(c.state.turn);
+    final date = c.game.dateLabel(c.state.turn);
     final nation = c.human >= 0 ? c.world.nations[c.human] : null;
     final net = c.commanding ? c.income - c.upkeep - c.researchSpend - c.tribute : 0;
     final offers = c.peaceOffers.length + c.allianceOffers.length + c.pactOffers.length + (c.pendingHappening != null && c.orders.answer == null ? 1 : 0);
@@ -371,7 +371,10 @@ class _TopBar extends StatelessWidget {
                 child: Stat('Gold', '${c.goldFree}', detail: '${net >= 0 ? '+' : ''}$net a turn', detailColor: net >= 0 ? AtlasColors.ivoryDim : AtlasColors.signalText),
               ),
               Expanded(flex: 3, child: Stat('Army', '${c.army}')),
-              Expanded(flex: 4, child: Stat('Provinces', '${c.game.realmCount(c.human)}', detail: 'of ${c.game.winTarget} to win')),
+              Expanded(
+                flex: 4,
+                child: Stat('Provinces', '${c.game.realmCount(c.human)}', detail: c.state.sandbox ? 'of ${c.world.provinces.length}' : 'of ${c.game.winTarget} to win'),
+              ),
             ]),
           ),
       ]),
@@ -451,11 +454,12 @@ class _Legend extends StatelessWidget {
       case MapMode.diplomacy:
         content = Wrap(spacing: 10, runSpacing: 4, children: [
           for (final relation in Relation.values)
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              NationSwatch(relation.color, width: 10, height: 10),
-              const SizedBox(width: 4),
-              Text(relation.legend.toUpperCase(), style: AtlasText.label.copyWith(color: AtlasColors.ivory, letterSpacing: 0.8)),
-            ]),
+            if (relation != Relation.wild || controller.world.wild >= 0)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                NationSwatch(relation.color, width: 10, height: 10),
+                const SizedBox(width: 4),
+                Text(relation.legend.toUpperCase(), style: AtlasText.label.copyWith(color: AtlasColors.ivory, letterSpacing: 0.8)),
+              ]),
         ]);
       case MapMode.relations:
         content = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
@@ -528,11 +532,11 @@ class _Powers extends StatelessWidget {
     }
     final nations = [
       for (final n in c.world.nations)
-        if (c.state.alive[n.id]) n,
+        if (c.state.alive[n.id] && !n.wild) n,
     ]..sort((a, b) => held[b.id] - held[a.id]);
     return AtlasSheet(
       title: 'The powers',
-      note: '${c.game.winTarget} of ${c.world.provinces.length} provinces win the war',
+      note: c.state.sandbox ? 'No victory: the game goes on' : '${c.game.winTarget} of ${c.world.provinces.length} provinces win the war',
       action: IconButton(onPressed: onStatistics, icon: const Icon(Icons.show_chart), tooltip: 'Statistics over time'),
       body: ListView.builder(
         shrinkWrap: true,
@@ -550,6 +554,7 @@ class _Powers extends StatelessWidget {
                   Relation.war => (c.game.hasPeaceOffer(n.id, c.human) ? 'Offers peace' : 'At war', AtlasColors.signalText),
                   Relation.truce => ('Truce ${c.game.truceLeft(c.human, n.id)}', AtlasColors.ivoryDim),
                   Relation.pact => ('Pact ${c.game.pactLeft(c.human, n.id)}', AtlasColors.ivoryDim),
+                  Relation.wild => ('', AtlasColors.ivoryDim),
                   Relation.peace => (c.game.hasAllianceOffer(n.id, c.human) ? 'Offers alliance' : 'Peace', AtlasColors.ivoryDim),
                 };
           return InkWell(

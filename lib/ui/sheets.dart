@@ -98,7 +98,7 @@ Future<void> showHowToPlay(BuildContext context) {
   final capital = Rules.defenseBonus + Rules.capitalBonus;
   final spread = (Rules.combatSpread * 100).round();
   final rules = [
-    ('The turn', 'One turn is one month. Give your orders, then end the turn. Every nation moves at the same moment.'),
+    ('The turn', 'A turn is a month, a season or a year on the calendar, as chosen when the game was set up. Give your orders, then end the turn. Every nation moves at the same moment.'),
     (
       'Recruiting',
       'A unit costs ${Rules.unitCost} gold. A province raises up to ${Rules.recruitBase} plus its income each turn. '
@@ -152,16 +152,35 @@ Future<void> showHowToPlay(BuildContext context) {
           'and nations look first for wars against those they dislike.'
     ),
     (
+      'Call to arms',
+      'Alliances are defensive, but at war you can call your allies in: tap an enemy province and choose Call allies. '
+          'Each ally decides for itself: one that likes you and sees the odds in your favour declares war on your enemy. Your allies may call on you too.'
+    ),
+    (
+      'Guarantees',
+      'Guarantee a nation\'s independence from Diplomacy and you go to war with whoever declares war on it, as an ally would. '
+          'It is one-sided: the nation is not bound to your wars. A guarantee ends if you go to war with that nation yourself.'
+    ),
+    (
       'Pacts',
       'A non-aggression pact needs both sides to agree. For ${Rules.pactTurns} turns neither may declare war on the other, '
           'and neither joins a war against the other through an alliance.'
+    ),
+    (
+      'Unclaimed land',
+      'Some scenarios leave land that no nation rules, drawn as blank paper. No war is needed to take it: move an army in from next door. '
+          'Its people fight back ${Rules.wildMilitia.round()} times as hard as a militia, and the land yields half its income until it is settled.'
     ),
     (
       'Events',
       'Harvests, strikes, fires, epidemics and inventors come by chance. Some ask you to choose: your answer takes effect at the end of the turn. '
           'They can be turned off when a game is set up.'
     ),
-    ('Winning', 'Hold the share of provinces chosen at the start, your vassals\' included, and the war is yours. Lose your last province and it is over.'),
+    (
+      'Winning',
+      'Hold the share of provinces chosen at the start, your vassals\' included, and the war is yours; or set no victory at all and play on for as long as you like. '
+          'Lose your last province and it is over.'
+    ),
   ];
   return showAtlasSheet<void>(
     context,

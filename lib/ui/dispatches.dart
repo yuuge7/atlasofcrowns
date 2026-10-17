@@ -14,9 +14,9 @@ import 'widgets.dart';
 
 enum Tone { good, bad, plain }
 
-/// An offer the player can answer from the dispatches, or a happening
-/// waiting for their answer.
-enum Offer { peace, alliance, pact, happening }
+/// An offer the player can answer from the dispatches, a happening waiting
+/// for their answer, or an ally's call to arms (against the nation given).
+enum Offer { peace, alliance, pact, happening, arms }
 
 class Dispatch {
   const Dispatch(this.text, [this.tone = Tone.plain, this.offer]);
@@ -31,7 +31,8 @@ class Dispatch {
 /// A turn's events as sentences, split into what touched the player and
 /// what happened elsewhere.
 class Dispatches {
-  Dispatches(TurnReport report, World world, int human) {
+  /// [allies] are the player's allies now, to tell their calls to arms.
+  Dispatches(TurnReport report, World world, int human, {Set<int> allies = const {}}) {
     String nation(int n) => n < 0 ? 'someone' : world.nations[n].shortName;
     String place(int p) => world.provinces[p].name;
     final taken = <(int, int), List<int>>{};
@@ -86,14 +87,43 @@ class Dispatches {
             elsewhere.add(Dispatch('${nation(e.a)} threw off ${nation(e.b)}.'));
           }
         case EventKind.calledToArms:
+          final bond = e.flag ? 'guarantee' : 'alliance';
           if (e.a == human) {
-            yours.add(Dispatch('${nation(e.b)} attacked your ally ${nation(e.n1)}. You are at war with ${nation(e.b)}; the border opens next turn.', Tone.bad));
+            yours.add(Dispatch(
+                e.flag
+                    ? '${nation(e.b)} attacked ${nation(e.n1)}, whose independence you guaranteed. You are at war with ${nation(e.b)}; the border opens next turn.'
+                    : '${nation(e.b)} attacked your ally ${nation(e.n1)}. You are at war with ${nation(e.b)}; the border opens next turn.',
+                Tone.bad));
           } else if (e.b == human) {
             yours.add(Dispatch('${nation(e.a)} stands by ${nation(e.n1)} and declares war on you.', Tone.bad));
           } else if (e.n1 == human) {
-            yours.add(Dispatch('${nation(e.a)} honours the alliance and joins your war against ${nation(e.b)}.', Tone.good));
+            yours.add(Dispatch('${nation(e.a)} honours the $bond and joins your war against ${nation(e.b)}.', Tone.good));
           } else {
             elsewhere.add(Dispatch('${nation(e.a)} joins ${nation(e.n1)} against ${nation(e.b)}.'));
+          }
+        case EventKind.armsCalled:
+          if (e.a == human) {
+            yours.add(Dispatch('You called your allies to arms against ${nation(e.b)}. They answer as they see fit.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} calls on its allies to join its war against you.', Tone.bad));
+          } else if (allies.contains(e.a)) {
+            yours.add(Dispatch('Your ally ${nation(e.a)} calls on you to join its war against ${nation(e.b)}.', Tone.plain, (Offer.arms, e.b)));
+          }
+        case EventKind.guaranteeGiven:
+          if (e.a == human) {
+            yours.add(Dispatch('You guarantee the independence of ${nation(e.b)}.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} guarantees your independence: whoever attacks you will face it too.', Tone.good));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} guarantees the independence of ${nation(e.b)}.'));
+          }
+        case EventKind.guaranteeRevoked:
+          if (e.a == human) {
+            yours.add(Dispatch('You withdrew your guarantee of ${nation(e.b)}.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} no longer guarantees your independence.', Tone.bad));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} withdrew its guarantee of ${nation(e.b)}.'));
           }
         case EventKind.allianceSigned:
           if (mine) {
@@ -142,7 +172,13 @@ class Dispatches {
         case EventKind.happening:
           if (e.a == human) yours.add(_happening(e, world, nation, place));
         case EventKind.battle:
-          if (e.a == human) {
+          if (world.isWild(e.b)) {
+            if (e.a == human) {
+              yours.add(e.flag
+                  ? Dispatch('Took ${place(e.province)}, unclaimed until now: ${e.n1} against ${e.n2} defenders, ${e.n3} hold it.', Tone.good)
+                  : Dispatch('The expedition into ${place(e.province)} failed. All ${e.n1} were lost against ${e.n2} defenders.', Tone.bad));
+            }
+          } else if (e.a == human) {
             yours.add(e.flag
                 ? Dispatch('Took ${place(e.province)} from ${nation(e.b)}: ${e.n1} attacked ${e.n2}, ${e.n3} hold it.', Tone.good)
                 : Dispatch('The attack on ${place(e.province)} failed. All ${e.n1} were lost against ${e.n2} of ${nation(e.b)}.', Tone.bad));
@@ -181,7 +217,7 @@ class Dispatches {
           }
         case EventKind.history:
           final h = world.history[e.n1];
-          final touched = h.alliances.any((p) => p.$1 == human || p.$2 == human) || h.wars.any((p) => p.$1 == human || p.$2 == human);
+          final touched = [...h.alliances, ...h.breaks, ...h.guarantees, ...h.pacts, ...h.wars].any((p) => p.$1 == human || p.$2 == human);
           (touched ? yours : elsewhere).add(Dispatch(h.text, Tone.plain));
         case EventKind.gameOver:
           break;
@@ -190,6 +226,10 @@ class Dispatches {
     for (final entry in taken.entries) {
       final (winner, loser) = entry.key;
       final provinces = entry.value;
+      if (world.isWild(loser)) {
+        elsewhere.add(Dispatch(provinces.length == 1 ? '${nation(winner)} claimed ${place(provinces.first)}.' : '${nation(winner)} claimed ${provinces.length} provinces of unclaimed land.'));
+        continue;
+      }
       elsewhere.add(
           Dispatch(provinces.length == 1 ? '${nation(winner)} took ${place(provinces.first)} from ${nation(loser)}.' : '${nation(winner)} took ${provinces.length} provinces from ${nation(loser)}.'));
     }
@@ -241,12 +281,12 @@ class Dispatches {
 Future<void> showDispatches(BuildContext context, GameController controller) {
   final report = controller.lastReport;
   if (report == null) return Future.value();
-  final dispatches = Dispatches(report, controller.world, controller.human);
+  final dispatches = Dispatches(report, controller.world, controller.human, allies: controller.allies);
   return showAtlasSheet<void>(
     context,
     (context) => AtlasSheet(
       title: 'Dispatches',
-      note: 'What happened in ${controller.world.dateLabel(report.turn)}',
+      note: 'What happened in ${controller.game.dateLabel(report.turn)}',
       body: ListenableBuilder(
         listenable: controller,
         builder: (context, _) => ListView(
@@ -290,7 +330,13 @@ class _Line extends StatelessWidget {
       Tone.plain => AtlasColors.baizeLight,
     };
     Widget? reply;
-    if (dispatch.offer case (Offer.happening, final province)) {
+    if (dispatch.offer case (Offer.arms, final enemy)) {
+      if (controller.orders.declareWar.contains(enemy)) {
+        reply = OutlinedButton(onPressed: () => controller.setWarDeclared(enemy, false), child: const Text('JOINED'));
+      } else if (controller.game.canDeclareWar(controller.human, enemy)) {
+        reply = FilledButton(onPressed: () => controller.setWarDeclared(enemy, true), child: const Text('JOIN'));
+      }
+    } else if (dispatch.offer case (Offer.happening, final province)) {
       if (controller.pendingHappening?.$2 == province) {
         reply = controller.orders.answer == null
             ? FilledButton(onPressed: () => showHappening(context, controller), child: const Text('ANSWER'))
@@ -300,7 +346,7 @@ class _Line extends StatelessWidget {
       final (open, answered, answer) = switch (kind) {
         Offer.peace => (controller.peaceOffers, controller.orders.offerPeace, controller.setPeaceOffered),
         Offer.alliance => (controller.allianceOffers, controller.orders.offerAlliance, controller.setAllianceOffered),
-        Offer.pact || Offer.happening => (controller.pactOffers, controller.orders.offerPact, controller.setPactOffered),
+        Offer.pact || Offer.happening || Offer.arms => (controller.pactOffers, controller.orders.offerPact, controller.setPactOffered),
       };
       if (open.contains(from)) {
         reply = answered.contains(from)

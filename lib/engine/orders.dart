@@ -98,6 +98,9 @@ class Orders {
       ..peaceTerms.addAll({for (final e in (j['peaceTerms'] as Map<String, dynamic>? ?? const {}).entries) int.parse(e.key): Terms.values[e.value as int]})
       ..declareIndependence = j['independence'] as bool? ?? false
       ..offerPact.addAll((j['offerPact'] as List? ?? const []).cast<int>())
+      ..guarantee.addAll((j['guarantee'] as List? ?? const []).cast<int>())
+      ..callToArms.addAll((j['callToArms'] as List? ?? const []).cast<int>())
+      ..revokeGuarantee.addAll((j['revokeGuarantee'] as List? ?? const []).cast<int>())
       ..envoys.addAll((j['envoys'] as List? ?? const []).cast<int>())
       ..gifts.addAll({for (final e in (j['gifts'] as Map<String, dynamic>? ?? const {}).entries) int.parse(e.key): e.value as int})
       ..answer = j['answer'] as int?
@@ -132,6 +135,15 @@ class Orders {
   /// Nations to offer a non-aggression pact to, or whose offer is accepted.
   final Set<int> offerPact = {};
 
+  /// Nations whose independence to guarantee.
+  final Set<int> guarantee = {};
+
+  /// Enemies the allies are called to declare war on.
+  final Set<int> callToArms = {};
+
+  /// Nations whose independence is no longer guaranteed.
+  final Set<int> revokeGuarantee = {};
+
   /// Nations to send an envoy to, each at [Game.envoyCost].
   final Set<int> envoys = {};
 
@@ -154,6 +166,9 @@ class Orders {
       offerAlliance.isEmpty &&
       breakAlliance.isEmpty &&
       offerPact.isEmpty &&
+      guarantee.isEmpty &&
+      callToArms.isEmpty &&
+      revokeGuarantee.isEmpty &&
       envoys.isEmpty &&
       gifts.isEmpty &&
       answer == null &&
@@ -171,6 +186,9 @@ class Orders {
         'offerAlliance': offerAlliance.toList(),
         'breakAlliance': breakAlliance.toList(),
         'offerPact': offerPact.toList(),
+        'guarantee': guarantee.toList(),
+        'callToArms': callToArms.toList(),
+        'revokeGuarantee': revokeGuarantee.toList(),
         'envoys': envoys.toList(),
         'gifts': {for (final e in gifts.entries) '${e.key}': e.value},
         'answer': answer,

@@ -47,7 +47,7 @@ class _StatisticsSheetState extends State<_StatisticsSheet> {
     final c = widget.controller;
     final s = c.state;
     final samples = s.chronicle;
-    final from = c.world.dateLabel(s.chronicleFrom);
+    final from = c.game.dateLabel(s.chronicleFrom);
     if (samples.isEmpty) {
       return const AtlasSheet(title: 'Statistics', body: Padding(padding: EdgeInsets.all(20), child: Text('Nothing recorded yet.', style: AtlasText.note)));
     }
@@ -57,7 +57,10 @@ class _StatisticsSheetState extends State<_StatisticsSheet> {
     int turnOf(int sample) => s.chronicleFrom + sample * s.chronicleEvery;
 
     // The leaders now, and the player wherever they stand.
-    final ranked = [for (var n = 0; n < c.world.nations.length; n++) n]..sort((a, b) => value(b, last) != value(a, last) ? value(b, last) - value(a, last) : a - b);
+    final ranked = [
+      for (var n = 0; n < c.world.nations.length; n++)
+        if (!c.world.isWild(n)) n,
+    ]..sort((a, b) => value(b, last) != value(a, last) ? value(b, last) - value(a, last) : a - b);
     final series = ranked.take(_shown).toList();
     if (c.human >= 0 && !series.contains(c.human)) series[_shown - 1] = c.human;
     final byValueAt = List.of(series)..sort((a, b) => value(b, at) != value(a, at) ? value(b, at) - value(a, at) : a - b);
@@ -97,7 +100,7 @@ class _StatisticsSheetState extends State<_StatisticsSheet> {
               onTapDown: (d) => point(d.localPosition.dx, box.maxWidth),
               onHorizontalDragUpdate: (d) => point(d.localPosition.dx, box.maxWidth),
               child: Semantics(
-                label: '${_measure.label} of the leading powers from $from to ${c.world.dateLabel(s.turn)}. The values are listed below.',
+                label: '${_measure.label} of the leading powers from $from to ${c.game.dateLabel(s.turn)}. The values are listed below.',
                 child: SizedBox(
                   height: 220,
                   width: double.infinity,
@@ -115,7 +118,7 @@ class _StatisticsSheetState extends State<_StatisticsSheet> {
                       ],
                       cursor: at,
                       firstDate: from,
-                      lastDate: c.world.dateLabel(turnOf(last)),
+                      lastDate: c.game.dateLabel(turnOf(last)),
                     ),
                   ),
                 ),
@@ -125,7 +128,7 @@ class _StatisticsSheetState extends State<_StatisticsSheet> {
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 4),
             child: Text(
-              _cursor == null ? '${c.world.dateLabel(turnOf(at))}. Touch the chart to read another month.' : c.world.dateLabel(turnOf(at)),
+              _cursor == null ? '${c.game.dateLabel(turnOf(at))}. Touch the chart to read another date.' : c.game.dateLabel(turnOf(at)),
               style: AtlasText.note,
             ),
           ),

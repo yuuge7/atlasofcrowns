@@ -112,6 +112,12 @@ const NATO = [
   'LUX', 'MNE', 'NLD', 'MKD', 'NOR', 'POL', 'PRT', 'ROU', 'SVK', 'SVN', 'ESP', 'SWE', 'TUR', 'GBR',
 ];
 
+/** Who holds each province: its modern country, bar the few set above. */
+export const ownerOf = (p) => OWNER_BY_PROVINCE[p.name] ?? p.modern;
+
+/** How developed each province is, by its owner. */
+export const developmentOf = (p) => DEVELOPMENT[ownerOf(p)] ?? 1;
+
 export const ALLIANCES = [
   ...NATO.flatMap((a, i) => NATO.slice(i + 1).map((b) => [a, b])),
   ['RUS', 'BLR'], ['RUS', 'KAZ'],

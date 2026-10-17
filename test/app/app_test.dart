@@ -540,10 +540,24 @@ void main() {
     expect(find.text('PLAY AS GERMANY'), findsOneWidget);
 
     // Germany is in both scenarios and stays picked across the switch.
-    await tester.tap(find.text('Europe today'));
+    await tester.ensureVisible(find.text('Road to war'));
     await tester.pumpAndSettle();
-    expect(find.text('Federal Republic of Germany'), findsOneWidget);
+    await tester.tap(find.text('Road to war'));
+    await tester.pumpAndSettle();
+    expect(find.text('German Reich'), findsOneWidget);
     expect(find.text('PLAY AS GERMANY'), findsOneWidget);
+
+    // Another map: the scenarios scroll sideways.
+    final strip = find.descendant(of: find.byType(ListView), matching: find.byType(Scrollable)).first;
+    await tester.scrollUntilVisible(find.text('Fifty states'), 150, scrollable: strip);
+    await tester.ensureVisible(find.text('Fifty states'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Fifty states'));
+    await tester.pumpAndSettle();
+    expect(find.text('PLAY AS ALABAMA'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('The Great War'), -150, scrollable: strip);
+    await tester.ensureVisible(find.text('The Great War'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('The Great War'));
     await tester.pumpAndSettle();
     expect(find.text('German Empire'), findsOneWidget);

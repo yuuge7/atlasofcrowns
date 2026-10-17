@@ -28,6 +28,7 @@ class GameState {
     this.difficulty = Rules.normalDifficulty,
     this.fog = false,
     this.randomEvents = false,
+    this.monthsPerTurn = 1,
     List<int>? lastWar,
     List<int>? forts,
     List<int>? development,
@@ -70,6 +71,7 @@ class GameState {
       difficulty: j['difficulty'] as int? ?? Rules.normalDifficulty,
       fog: j['fog'] as bool? ?? false,
       randomEvents: j['randomEvents'] as bool? ?? true,
+      monthsPerTurn: j['monthsPerTurn'] as int? ?? 1,
       // Saves from before this field existed count everyone as just out of a war.
       lastWar: intList('lastWar') ?? List.filled((j['gold'] as List).length, j['turn'] as int),
       // Saves from before buildings have none, and count every province as
@@ -102,6 +104,8 @@ class GameState {
       ..peaceTerms.addAll(intMap('peaceTerms'))
       ..gains.addAll(intMap('gains'))
       ..tribute.addAll(intMap('tribute'))
+      ..guarantees.addAll(intList('guarantees') ?? const [])
+      ..armsCalls.addAll(intMap('armsCalls'))
       ..relations.addAll(intMap('relations'))
       ..pacts.addAll(intMap('pacts'))
       ..pactOffers.addAll(intMap('pactOffers'))
@@ -133,6 +137,9 @@ class GameState {
     warStart[key] = turn;
     lastGain[key] = turn;
     pacts.remove(key);
+    guarantees
+      ..remove(directedKey(a, b))
+      ..remove(directedKey(b, a));
     setRelation(a, b, relation(a, b) < Rules.declaredRelation ? relation(a, b) : Rules.declaredRelation);
     for (final offer in [directedKey(a, b), directedKey(b, a)]) {
       peaceOffers.remove(offer);
@@ -154,6 +161,7 @@ class GameState {
       peaceOffers.remove(offer);
       peaceTerms.remove(offer);
       gains.remove(offer);
+      armsCalls.remove(offer);
     }
   }
 
@@ -167,7 +175,8 @@ class GameState {
 
     wars.removeWhere(involves);
     alliances.removeWhere(involves);
-    for (final map in [warStart, lastGain, truceUntil, peaceOffers, peaceTerms, allianceOffers, allianceAsked, gains, tribute, relations, pacts, pactOffers, pactAsked]) {
+    guarantees.removeWhere(involves);
+    for (final map in [warStart, lastGain, truceUntil, peaceOffers, peaceTerms, allianceOffers, allianceAsked, gains, tribute, relations, pacts, pactOffers, pactAsked, armsCalls]) {
       map.removeWhere((key, _) => involves(key));
     }
     pending.remove(n);
@@ -194,6 +203,10 @@ class GameState {
 
   /// Whether harvests, strikes, fires and the like happen by chance.
   final bool randomEvents;
+
+  /// Months of the calendar one turn stands for: 1, 3 or 12. Every rule
+  /// counts in turns; only the date moves faster.
+  final int monthsPerTurn;
 
   /// Turns fully resolved so far.
   int turn = 0;
@@ -245,6 +258,14 @@ class GameState {
 
   /// The overlord of each nation, or -1 for a free one.
   final List<int> overlord;
+
+  /// [directedKey] (caller, enemy) -> turn on which the caller's call to its
+  /// allies to join its war on the enemy lapses.
+  final Map<int, int> armsCalls = {};
+
+  /// [directedKey]s (guarantor, guaranteed): the guarantor joins any war
+  /// declared on the guaranteed nation.
+  final Set<int> guarantees = {};
 
   /// [pairKey] -> how the two feel about each other, see [relation]. Pairs
   /// at 0 are left out.
@@ -309,7 +330,8 @@ class GameState {
   /// Winner once [ended], or -1 when the player was wiped out first.
   int winner = -1;
 
-  /// Play on after the game is decided; no further victory checks.
+  /// No victory checks: set from the start for an endless game, or once the
+  /// player plays on after the game was decided.
   bool sandbox = false;
 
   Map<String, dynamic> toJson() {
@@ -321,6 +343,7 @@ class GameState {
       'difficulty': difficulty,
       'fog': fog,
       'randomEvents': randomEvents,
+      'monthsPerTurn': monthsPerTurn,
       'turn': turn,
       'owner': owner,
       'units': units,
@@ -340,6 +363,8 @@ class GameState {
       'truceUntil': strMap(truceUntil),
       'peaceOffers': strMap(peaceOffers),
       'alliances': alliances.toList()..sort(),
+      'guarantees': guarantees.toList()..sort(),
+      'armsCalls': strMap(armsCalls),
       'allianceOffers': strMap(allianceOffers),
       'allianceAsked': strMap(allianceAsked),
       'peaceTerms': strMap(peaceTerms),
