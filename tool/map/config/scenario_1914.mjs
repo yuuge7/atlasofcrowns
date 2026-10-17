@@ -10,30 +10,31 @@ export const EXCLUDE_ADM0 = ['GRL', 'USA', 'FRO', 'ISL', 'AFG', 'PAK', 'MRT', 'S
 
 /**
  * `ready` scales the army a nation starts with (default 1): how far it had
- * mobilised by August 1914, and how good that army was.
+ * mobilised by August 1914, and how good that army was. `tech` is the
+ * starting level in army and industry (default 0, 0).
  */
 export const NATIONS = [
-  { tag: 'GER', name: 'German Empire', short: 'Germany', color: '#6F6C68', capital: [13.4, 52.52], ready: 1.5 },
-  { tag: 'AUS', name: 'Austria-Hungary', short: 'Austria-Hungary', color: '#E3DAC6', capital: [16.37, 48.21], ready: 1.2 },
+  { tag: 'GER', name: 'German Empire', short: 'Germany', color: '#6F6C68', capital: [13.4, 52.52], ready: 1.5, tech: [2, 2] },
+  { tag: 'AUS', name: 'Austria-Hungary', short: 'Austria-Hungary', color: '#E3DAC6', capital: [16.37, 48.21], ready: 1.2, tech: [1, 1] },
   { tag: 'RUS', name: 'Russian Empire', short: 'Russia', color: '#4C7D55', capital: [30.3, 59.94], ready: 0.9 },
   { tag: 'OTT', name: 'Ottoman Empire', short: 'Ottomans', color: '#C9A75C', capital: [28.97, 41.01] },
-  { tag: 'UKG', name: 'United Kingdom', short: 'Britain', color: '#C9475E', capital: [-0.12, 51.5], ready: 0.8 },
-  { tag: 'FRA', name: 'French Republic', short: 'France', color: '#3F6CC4', capital: [2.35, 48.85] },
-  { tag: 'ITA', name: 'Kingdom of Italy', short: 'Italy', color: '#86C17A', capital: [12.5, 41.9] },
+  { tag: 'UKG', name: 'United Kingdom', short: 'Britain', color: '#C9475E', capital: [-0.12, 51.5], ready: 0.8, tech: [1, 2] },
+  { tag: 'FRA', name: 'French Republic', short: 'France', color: '#3F6CC4', capital: [2.35, 48.85], tech: [1, 1] },
+  { tag: 'ITA', name: 'Kingdom of Italy', short: 'Italy', color: '#86C17A', capital: [12.5, 41.9], tech: [1, 1] },
   { tag: 'SPA', name: 'Kingdom of Spain', short: 'Spain', color: '#E6C744', capital: [-3.7, 40.42] },
   { tag: 'POR', name: 'Portuguese Republic', short: 'Portugal', color: '#2F9C95', capital: [-9.14, 38.72] },
-  { tag: 'NET', name: 'Kingdom of the Netherlands', short: 'Netherlands', color: '#EB8B3A', capital: [4.9, 52.37] },
-  { tag: 'BEL', name: 'Kingdom of Belgium', short: 'Belgium', color: '#A8743B', capital: [4.35, 50.85] },
-  { tag: 'LUX', name: 'Luxembourg', short: 'Luxembourg', color: '#8ED3DD', capital: [6.13, 49.61] },
-  { tag: 'SWI', name: 'Swiss Confederation', short: 'Switzerland', color: '#7A2E3A', capital: [7.45, 46.95] },
-  { tag: 'DEN', name: 'Kingdom of Denmark', short: 'Denmark', color: '#D98C7A', capital: [12.4, 55.7] },
-  { tag: 'NOR', name: 'Kingdom of Norway', short: 'Norway', color: '#7C63B8', capital: [10.75, 59.91] },
-  { tag: 'SWE', name: 'Kingdom of Sweden', short: 'Sweden', color: '#5AA9E6', capital: [18.07, 59.33] },
-  { tag: 'SER', name: 'Kingdom of Serbia', short: 'Serbia', color: '#B0552F', capital: [20.46, 44.8] },
+  { tag: 'NET', name: 'Kingdom of the Netherlands', short: 'Netherlands', color: '#EB8B3A', capital: [4.9, 52.37], tech: [0, 1] },
+  { tag: 'BEL', name: 'Kingdom of Belgium', short: 'Belgium', color: '#A8743B', capital: [4.35, 50.85], tech: [1, 2] },
+  { tag: 'LUX', name: 'Luxembourg', short: 'Luxembourg', color: '#8ED3DD', capital: [6.13, 49.61], tech: [0, 1] },
+  { tag: 'SWI', name: 'Swiss Confederation', short: 'Switzerland', color: '#7A2E3A', capital: [7.45, 46.95], tech: [1, 1] },
+  { tag: 'DEN', name: 'Kingdom of Denmark', short: 'Denmark', color: '#D98C7A', capital: [12.4, 55.7], tech: [0, 1] },
+  { tag: 'NOR', name: 'Kingdom of Norway', short: 'Norway', color: '#7C63B8', capital: [10.75, 59.91], tech: [0, 1] },
+  { tag: 'SWE', name: 'Kingdom of Sweden', short: 'Sweden', color: '#5AA9E6', capital: [18.07, 59.33], tech: [1, 1] },
+  { tag: 'SER', name: 'Kingdom of Serbia', short: 'Serbia', color: '#B0552F', capital: [20.46, 44.8], tech: [1, 0] },
   { tag: 'MNE', name: 'Kingdom of Montenegro', short: 'Montenegro', color: '#3E4A8A', capital: [19.26, 42.44] },
   { tag: 'ALB', name: 'Principality of Albania', short: 'Albania', color: '#C24A8F', capital: [19.82, 41.33] },
-  { tag: 'GRE', name: 'Kingdom of Greece', short: 'Greece', color: '#59B7D9', capital: [23.73, 37.98] },
-  { tag: 'BUL', name: 'Tsardom of Bulgaria', short: 'Bulgaria', color: '#7A9A3B', capital: [23.32, 42.7] },
+  { tag: 'GRE', name: 'Kingdom of Greece', short: 'Greece', color: '#59B7D9', capital: [23.73, 37.98], tech: [1, 0] },
+  { tag: 'BUL', name: 'Tsardom of Bulgaria', short: 'Bulgaria', color: '#7A9A3B', capital: [23.32, 42.7], tech: [1, 0] },
   { tag: 'ROM', name: 'Kingdom of Romania', short: 'Romania', color: '#E3D36A', capital: [26.1, 44.43] },
   { tag: 'PER', name: 'Sublime State of Persia', short: 'Persia', color: '#8F6BB0', capital: [51.39, 35.69] },
 ];
@@ -174,6 +175,74 @@ export const WARS = [
   ['GER', 'FRA'], ['GER', 'RUS'], ['GER', 'UKG'], ['GER', 'BEL'], ['GER', 'SER'], ['GER', 'MNE'],
   ['AUS', 'RUS'], ['AUS', 'SER'], ['AUS', 'MNE'], ['AUS', 'FRA'], ['AUS', 'UKG'], ['AUS', 'BEL'],
 ];
+
+/**
+ * Alliances in force when the scenario opens. The Entente and its Balkan
+ * protégés, the Dual Alliance, and the secret Ottoman-German treaty of
+ * 2 August 1914. Italy and Romania had stayed out of their treaties.
+ */
+export const ALLIANCES = [
+  ['FRA', 'RUS'], ['FRA', 'UKG'], ['RUS', 'UKG'], ['UKG', 'BEL'], ['FRA', 'BEL'],
+  ['RUS', 'SER'], ['SER', 'MNE'], ['UKG', 'POR'],
+  ['GER', 'AUS'], ['GER', 'OTT'],
+];
+
+/**
+ * The war as it went: who joined, and when. Each event is replayed in its
+ * month if it still makes sense then (both sides standing, not already at
+ * war or allied). A player's nation is never made to declare war; it is
+ * offered the alliance instead.
+ */
+export const HISTORY = [
+  {
+    date: [1914, 11],
+    text: 'The Ottoman fleet shells Odessa. The Ottoman Empire enters the war against Russia.',
+    wars: [['OTT', 'RUS']],
+  },
+  {
+    date: [1915, 5],
+    text: 'Bound by the secret Treaty of London, Italy joins the Entente and declares war on Austria-Hungary.',
+    alliances: [['ITA', 'FRA'], ['ITA', 'UKG'], ['ITA', 'RUS']],
+    wars: [['ITA', 'AUS']],
+  },
+  {
+    date: [1915, 10],
+    text: 'Bulgaria joins the Central Powers and invades Serbia.',
+    alliances: [['BUL', 'GER'], ['BUL', 'AUS'], ['BUL', 'OTT']],
+    wars: [['BUL', 'SER']],
+  },
+  {
+    date: [1916, 3],
+    text: 'Lisbon seizes the German ships in its harbours. Germany declares war on Portugal.',
+    wars: [['GER', 'POR']],
+  },
+  {
+    date: [1916, 8],
+    text: 'Romania joins the Entente and marches into Transylvania.',
+    alliances: [['ROM', 'FRA'], ['ROM', 'RUS']],
+    wars: [['ROM', 'AUS']],
+  },
+  {
+    date: [1917, 6],
+    text: 'Greece, united under Venizelos, joins the Entente.',
+    alliances: [['GRE', 'FRA'], ['GRE', 'UKG']],
+    wars: [['GRE', 'BUL']],
+  },
+];
+
+/**
+ * Fortresses standing in August 1914, by 1914 province name: level 2 for
+ * the great ring fortresses, 1 for the rest. Verdun and Toul sit in Nancy,
+ * Metz in Strassburg, Przemyśl in Lemberg, Novogeorgievsk in Warsaw.
+ */
+export const FORTS = {
+  Nancy: 2, Reims: 1, Besançon: 1, Lille: 1, Paris: 1,
+  Liège: 2, Brussels: 1,
+  Strassburg: 2, Königsberg: 1, Posen: 1, Mainz: 1,
+  Lemberg: 2, Kraków: 1, Trient: 1,
+  Warsaw: 1, Kovno: 1, 'Brest-Litovsk': 1, Kars: 1, 'St. Petersburg': 1,
+  Constantinople: 2, Venice: 1, Belgrade: 1, Bucharest: 1,
+};
 
 /**
  * How developed a modern country's territory was in 1914, relative to the

@@ -8,14 +8,7 @@ import 'widgets.dart';
 
 /// Lists the saved games. Returns the save the player picked, opened and
 /// ready, or null.
-Future<LoadedSave?> showLoadSheet(BuildContext context, GameAssets assets, SaveStore saves) {
-  return showModalBottomSheet<LoadedSave>(
-    context: context,
-    isScrollControlled: true,
-    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.72),
-    builder: (context) => _LoadSheet(assets, saves),
-  );
-}
+Future<LoadedSave?> showLoadSheet(BuildContext context, GameAssets assets, SaveStore saves) => showAtlasSheet<LoadedSave>(context, (context) => _LoadSheet(assets, saves));
 
 class _LoadSheet extends StatefulWidget {
   const _LoadSheet(this.assets, this.saves);
@@ -33,7 +26,7 @@ class _LoadSheetState extends State<_LoadSheet> {
 
   Future<void> _open(SaveInfo save) async {
     try {
-      final loaded = await widget.saves.load(save.id, widget.assets.world);
+      final loaded = await widget.saves.load(save.id, widget.assets);
       if (mounted) Navigator.pop(context, loaded);
     } on FormatException catch (e) {
       setState(() => _error = 'This save cannot be opened: ${e.message}. It was probably made with an older version of the map.');
@@ -52,20 +45,10 @@ class _LoadSheetState extends State<_LoadSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final nations = widget.assets.world.nations;
-    return SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 8, 6),
-          child: Row(children: [
-            const Expanded(child: Text('Load game', style: AtlasText.title)),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Close'),
-          ]),
-        ),
-        const Divider(color: AtlasColors.brass),
-        if (_error != null) Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Text(_error!, style: AtlasText.body.copyWith(color: const Color(0xFFF08A75)))),
-        Flexible(
-          child: FutureBuilder<List<SaveInfo>>(
+    return AtlasSheet(
+      title: 'Load game',
+      banner: _error == null ? null : Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Text(_error!, style: AtlasText.body.copyWith(color: AtlasColors.signalText))),
+      body: FutureBuilder<List<SaveInfo>>(
             future: _list,
             builder: (context, snapshot) {
               final saves = snapshot.data;
@@ -82,7 +65,7 @@ class _LoadSheetState extends State<_LoadSheet> {
                 itemCount: saves.length,
                 itemBuilder: (context, i) {
                   final save = saves[i];
-                  final nation = save.nation >= 0 ? nations[save.nation] : null;
+                  final nation = widget.assets.nationOf(save.scenario, save.nation);
                   return InkWell(
                     onTap: () => _open(save),
                     child: Padding(
@@ -104,8 +87,6 @@ class _LoadSheetState extends State<_LoadSheet> {
               );
             },
           ),
-        ),
-      ]),
     );
   }
 }
@@ -123,6 +104,23 @@ Future<void> showHowToPlay(BuildContext context) {
           'New units defend at once and can march from the next turn.'
     ),
     ('Upkeep', 'Every ${Rules.unitsPerUpkeepGold} units cost 1 gold a turn. When the treasury runs dry, units go home.'),
+    (
+      'Building',
+      'One project per province a turn. A fort multiplies the defence by ${Rules.fortBonus} more, up to ${Rules.maxFort} levels, '
+          'and costs ${Rules.fortUpkeep} gold a turn per level. Development adds 1 income, up to ${Rules.maxDevelop} times.'
+    ),
+    (
+      'Research',
+      'Put a share of the income into army or industry. Each army level adds ${(Rules.armyTechBonus * 100).round()}% to the strength of every unit; '
+          'each industry level adds ${(Rules.industryTechBonus * 100).round()}% to the income. Research is paid only from what is left after upkeep.'
+    ),
+    (
+      'Conquest',
+      'A province taken from its owner at the start yields ${(Rules.occupiedShare * 100).round()}% of its income at first, and all of it after ${Rules.integrationTurns} turns. '
+          'Its old owner gets it back whole. A captured fort loses a level. '
+          'Until then, land held with fewer units than its militia may revolt: back to its old owner if that owner is at war with you, '
+          'or as the old nation itself, risen from defeat.'
+    ),
     ('Moving', 'Units move one province a turn: across a border, or across a strait marked with a dotted line. Blue arrows are marches, red arrows are attacks.'),
     (
       'Battle',
@@ -130,35 +128,28 @@ Future<void> showHowToPlay(BuildContext context) {
           '($capital in a capital). Each side then rolls $spread% up or down. The loser is destroyed. The winner loses about as much strength as the loser brought.'
     ),
     ('War and peace', 'Select a foreign province to declare war on its owner. The border opens the turn after. Peace needs both sides to agree, and a truce of ${Rules.truceTurns} turns follows.'),
+    (
+      'Alliances',
+      'An alliance needs both sides to agree. When someone declares war on one of you, the other joins the war at once. '
+          'A war you start yourself stays yours: allies are not dragged into it. You can leave an alliance at any time, but not attack the ally in the same turn.'
+    ),
     ('Winning', 'Hold the share of provinces chosen at the start and the war is yours. Lose your last province and it is over.'),
   ];
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.8),
-    builder: (context) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 8, 6),
-          child: Row(children: [
-            const Expanded(child: Text('How to play', style: AtlasText.title)),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Close'),
-          ]),
-        ),
-        const Divider(color: AtlasColors.brass),
-        Flexible(
-          child: ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
-            children: [
-              for (final (heading, text) in rules) ...[
-                Padding(padding: const EdgeInsets.only(top: 14, bottom: 4), child: Text(heading.toUpperCase(), style: AtlasText.label.copyWith(color: AtlasColors.brassBright))),
-                Text(text, style: AtlasText.body),
-              ],
-            ],
-          ),
-        ),
-      ]),
+  return showAtlasSheet<void>(
+    context,
+    (context) => AtlasSheet(
+      title: 'How to play',
+      body: ListView(
+        shrinkWrap: true,
+        padding: const EdgeInsets.fromLTRB(20, 6, 20, 20),
+        children: [
+          for (final (heading, text) in rules) ...[
+            Padding(padding: const EdgeInsets.only(top: 14, bottom: 4), child: Text(heading.toUpperCase(), style: AtlasText.label.copyWith(color: AtlasColors.brassBright))),
+            Text(text, style: AtlasText.body),
+          ],
+        ],
+      ),
     ),
+    heightFactor: 0.8,
   );
 }

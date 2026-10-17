@@ -7,8 +7,10 @@
 // Stage 3 (mapshaper): dissolve by province, simplify, clean.
 // Stage 4 (here):      quantize, adjacency, sea links, income, write assets.
 //
-// Outputs assets/map/europe.json and assets/scenarios/1914.json, plus preview
-// PNGs and a province list under tool/map/out/ for eyeballing the result.
+// Outputs assets/map/europe.json, one assets/scenarios/<id>.json per scenario
+// and assets/scenarios/index.json listing them, plus preview PNGs and province
+// lists under tool/map/out/ for eyeballing the result. The 1914 config shapes
+// the map; every other scenario only assigns its provinces.
 import mapshaper from 'mapshaper';
 import polylabel from 'polylabel';
 import { Resvg } from '@resvg/resvg-js';
@@ -17,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cfg from './config/scenario_1914.mjs';
+import * as modernCfg from './config/scenario_modern.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -449,22 +452,33 @@ for (const pl of places) {
 }
 console.log(`  ${placed}/${places.length} cities placed`);
 
-// Scenario income: modern population, scaled by how developed the region was.
-for (const p of provinces) {
-  const dev = cfg.DEVELOPMENT[p.modern] ?? 1;
-  p.income = Math.max(1, Math.round((1.5 + Math.sqrt(p.pop / 100000)) * dev));
+/** Income from the people living there, scaled by how developed it is. */
+const incomeFor = (p, development) => Math.max(1, Math.round((1.5 + Math.sqrt(p.pop / 100000)) * development));
+
+// 1914 income: modern population, scaled by how developed the region was.
+for (const p of provinces) p.income = incomeFor(p, cfg.DEVELOPMENT[p.modern] ?? 1);
+
+/**
+ * Names the provinces after their biggest city, through [rename]; when two
+ * would share a name, the second takes its admin-1 name instead.
+ */
+function pickNames(rename) {
+  const used = new Set();
+  return provinces.map((p) => {
+    let name = rename[p.baseName] ?? p.baseName;
+    if (used.has(name)) name = rename[p.adminName] ?? p.adminName;
+    if (used.has(name)) throw new Error(`duplicate province name ${name}`);
+    used.add(name);
+    return name;
+  });
 }
 
 // Names: the biggest city, as it was called in 1914.
-const usedNames = new Set();
 for (const p of provinces) {
-  const base = (p.city ?? p.name).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
-  let name = cfg.RENAME[base] ?? base;
-  if (usedNames.has(name)) name = cfg.RENAME[p.name] ?? p.name;
-  if (usedNames.has(name)) throw new Error(`duplicate province name ${name}`);
-  usedNames.add(name);
-  p.name = name;
+  p.baseName = (p.city ?? p.name).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim();
+  p.adminName = p.name;
 }
+pickNames(cfg.RENAME).forEach((name, i) => (provinces[i].name = name));
 
 // Sea links, then make sure nothing is cut off.
 for (const [a, b, label] of cfg.SEA_LINKS) {
@@ -522,12 +536,6 @@ for (;;) {
   best[1].sea.add(best[0].id);
 }
 
-const capitals = cfg.NATIONS.map((n) => {
-  const p = locate(n.capital, `capital of ${n.tag}`, 40);
-  if (p.owner !== n.tag) throw new Error(`capital of ${n.tag} lands in ${p.name}, owned by ${p.owner}`);
-  return p.id;
-});
-
 const mapJson = {
   version: 1,
   name: 'europe',
@@ -553,32 +561,113 @@ mapJson.build = createHash('sha1').update(JSON.stringify(mapJson)).digest('hex')
 const mapText = JSON.stringify(mapJson);
 writeFileSync(path.join(root, 'assets/map/europe.json'), mapText);
 
-const scenarioJson = {
-  version: 1,
-  ...cfg.SCENARIO_META,
-  map: 'europe',
-  mapBuild: mapJson.build,
-  nations: cfg.NATIONS.map((n, i) => ({ tag: n.tag, name: n.name, short: n.short, color: n.color, capital: capitals[i], readiness: n.ready ?? 1 })),
-  owners: provinces.map((p) => nationIndex.get(p.owner)),
-  income: provinces.map((p) => p.income),
-  wars: cfg.WARS.map(([a, b]) => [nationIndex.get(a), nationIndex.get(b)]),
-};
-writeFileSync(path.join(root, 'assets/scenarios/1914.json'), JSON.stringify(scenarioJson));
+// ---------------------------------------------------------------- scenarios
+/**
+ * Writes scenario [sc] on the finished provinces. [ownerOf] gives a
+ * province's owner tag, [developmentOf] its development factor, and [names]
+ * the province names when they differ from the map's (1914) ones. Returns
+ * the province list for the report and the capitals.
+ */
+function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
+  const id = sc.SCENARIO_META.id;
+  const index = new Map(sc.NATIONS.map((n, i) => [n.tag, i]));
+  const nation = (tag, what) => {
+    if (!index.has(tag)) throw new Error(`${id}: ${what} names unknown nation ${tag}`);
+    return index.get(tag);
+  };
+  const nameOf = (p) => names?.[p.id] ?? p.name;
+  const owners = provinces.map((p) => nation(ownerOf(p), `the owner of ${p.name}`));
+  const income = provinces.map((p) => incomeFor(p, developmentOf(p)));
+  const capitals = sc.NATIONS.map((n) => {
+    const p = locate(n.capital, `${id}: capital of ${n.tag}`, 40);
+    if (ownerOf(p) !== n.tag) throw new Error(`${id}: capital of ${n.tag} lands in ${nameOf(p)}, owned by ${ownerOf(p)}`);
+    return p.id;
+  });
+  const forts = sc.FORTS ?? {};
+  for (const name of Object.keys(forts)) {
+    if (!provinces.some((p) => nameOf(p) === name)) throw new Error(`${id}: fort in ${name}: no such province`);
+  }
+  const pairs = (list, what) => (list ?? []).map(([a, b]) => [nation(a, what), nation(b, what)]);
+  const json = {
+    version: 1,
+    ...sc.SCENARIO_META,
+    map: 'europe',
+    mapBuild: mapJson.build,
+    nations: sc.NATIONS.map((n, i) => ({
+      tag: n.tag,
+      name: n.name,
+      short: n.short,
+      color: n.color,
+      capital: capitals[i],
+      readiness: n.ready ?? sc.DEFAULT_READY ?? 1,
+      tech: n.tech ?? sc.DEFAULT_TECH ?? [0, 0],
+    })),
+    owners,
+    income,
+    ...(names ? { names } : {}),
+    wars: pairs(sc.WARS, 'a war'),
+    alliances: pairs(sc.ALLIANCES, 'an alliance'),
+    forts: provinces.map((p) => forts[nameOf(p)] ?? 0),
+    history: historyJson(sc, index),
+  };
+  writeFileSync(path.join(root, `assets/scenarios/${id}.json`), JSON.stringify(json));
+
+  const lines = [];
+  for (const n of sc.NATIONS) {
+    const mine = provinces.filter((p) => ownerOf(p) === n.tag);
+    if (mine.length === 0) throw new Error(`${id}: ${n.tag} holds no province`);
+    lines.push(`${n.tag} ${n.name}: ${mine.length} provinces, income ${mine.reduce((s, p) => s + income[p.id], 0)}, capital ${nameOf(provinces[capitals[index.get(n.tag)]])}`);
+    for (const p of mine) {
+      const sea = p.sea.size ? `, sea ${[...p.sea].map((s) => nameOf(provinces[s])).join('/')}` : '';
+      lines.push(`   #${p.id} ${nameOf(p)} [${p.modern}] ${p.area} km2, income ${income[p.id]}, city ${p.city ?? '-'}, adj ${p.adj.size}${sea}`);
+    }
+  }
+  return { lines, capitals };
+}
+
+/** Scripted events, with dates turned into turns and tags into nation ids. */
+function historyJson(sc, index) {
+  const id = (tag) => {
+    if (!index.has(tag)) throw new Error(`history: unknown nation ${tag}`);
+    return index.get(tag);
+  };
+  return (sc.HISTORY ?? []).map((h) => {
+    const turn = (h.date[0] - sc.SCENARIO_META.startYear) * 12 + h.date[1] - sc.SCENARIO_META.startMonth;
+    if (turn < 1) throw new Error(`history: ${h.text} falls before the scenario opens`);
+    return {
+      turn,
+      text: h.text,
+      alliances: (h.alliances ?? []).map(([a, b]) => [id(a), id(b)]),
+      wars: (h.wars ?? []).map(([a, b]) => [id(a), id(b)]),
+    };
+  });
+}
+
+// The Great War: owners, names and income as the map was built for them.
+const great = writeScenario(cfg, { ownerOf: (p) => p.owner, developmentOf: (p) => cfg.DEVELOPMENT[p.modern] ?? 1 });
+const capitals = great.capitals;
+
+// Europe today: owners from each province's modern country (bar a few set by
+// 1914 province name), names from the largest city in today's spelling,
+// income from today's development. Forts take today's names.
+for (const name of Object.keys(modernCfg.OWNER_BY_PROVINCE)) {
+  if (!provinces.some((p) => p.name === name)) throw new Error(`modern owner for ${name}: no such province`);
+}
+const modernOwner = (p) => modernCfg.OWNER_BY_PROVINCE[p.name] ?? p.modern;
+const modern = writeScenario(modernCfg, {
+  ownerOf: modernOwner,
+  developmentOf: (p) => modernCfg.DEVELOPMENT[modernOwner(p)] ?? 1,
+  names: pickNames(modernCfg.RENAME),
+});
+
+writeFileSync(path.join(root, 'assets/scenarios/index.json'), JSON.stringify([cfg.SCENARIO_META.id, modernCfg.SCENARIO_META.id]));
 
 // ---------------------------------------------------------------- report
 const points = arcsQ.reduce((s, a) => s + a.length / 2, 0);
 console.log(`  ${provinces.length} provinces, ${arcsQ.length} arcs, ${points} points, map ${MAP_W}x${MAP_H}, ${(mapText.length / 1024).toFixed(0)} KB, build ${mapJson.build}`);
-const lines = [];
-for (const n of cfg.NATIONS) {
-  const mine = provinces.filter((p) => p.owner === n.tag);
-  const income = mine.reduce((s, p) => s + p.income, 0);
-  lines.push(`${n.tag} ${n.name}: ${mine.length} provinces, income ${income}, capital ${provinces[capitals[nationIndex.get(n.tag)]].name}`);
-  for (const p of mine) {
-    lines.push(`   #${p.id} ${p.name} [${p.modern}] ${p.area} km2, income ${p.income}, city ${p.city ?? '-'}, adj ${p.adj.size}${p.sea.size ? `, sea ${[...p.sea].map((s) => provinces[s].name).join('/')}` : ''}`);
-  }
-}
-writeFileSync(out('provinces.txt'), lines.join('\n'));
-console.log(lines.filter((l) => !l.startsWith(' ')).join('\n'));
+writeFileSync(out('provinces.txt'), great.lines.join('\n'));
+writeFileSync(out('provinces_modern.txt'), modern.lines.join('\n'));
+console.log(great.lines.filter((l) => !l.startsWith(' ')).join('\n'));
 
 // ---------------------------------------------------------------- previews
 const color = new Map(cfg.NATIONS.map((n) => [n.tag, n.color]));

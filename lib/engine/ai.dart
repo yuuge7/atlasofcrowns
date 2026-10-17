@@ -7,6 +7,38 @@ import 'rng.dart';
 import 'rules.dart';
 import 'state.dart';
 
+/// What every AI nation sees the same way in a turn, worked out once for
+/// all of them: orders do not change the state until the turn resolves.
+class Outlook {
+  Outlook(Game g)
+      : power = List.filled(g.world.nations.length, 0),
+        neighbors = g.neighborsOfAll(),
+        allies = List.generate(g.world.nations.length, (_) => <int>[]) {
+    final s = g.state;
+    // Strength: units in the field plus what the gold could buy, each worth
+    // what its army technology makes it.
+    for (var p = 0; p < s.owner.length; p++) {
+      power[s.owner[p]] += s.units[p];
+    }
+    for (var n = 0; n < power.length; n++) {
+      power[n] = ((power[n] + s.gold[n] ~/ Rules.unitCost) * g.armyFactor(n)).round();
+    }
+    for (final key in s.alliances.toList()..sort()) {
+      final (a, b) = pairOf(key);
+      allies[a].add(b);
+      allies[b].add(a);
+    }
+  }
+
+  final List<int> power;
+
+  /// [Game.neighborsOfAll].
+  final List<Set<int>> neighbors;
+
+  /// [Game.alliesOf] for every nation, in id order.
+  final List<List<int>> allies;
+}
+
 class _Target {
   _Target(this.province, this.need, this.score, this.sources);
 
@@ -18,27 +50,23 @@ class _Target {
 
 /// Plans one turn for nation [me].
 ///
-/// The plan in order: make peace where a war leads nowhere, pick on the
-/// weakest neighbor when strong enough, attack every enemy province that can
+/// The plan in order: make peace where a war leads nowhere, seek allies
+/// against a shared threat, pick on the weakest neighbor when strong enough, attack every enemy province that can
 /// be overwhelmed (or mass the army opposite one that cannot yet), walk rear
 /// units to the front (or to the border in peacetime) and spend the treasury
 /// on the most threatened provinces.
-Orders planAi(Game g, int me, Rng rng) {
+///
+/// [outlook] is shared by every nation planning on the same position; it is
+/// worked out here when not given.
+Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final w = g.world;
   final s = g.state;
   final orders = Orders();
   final mine = g.provincesOf(me);
   if (mine.isEmpty) return orders;
   final nationCount = w.nations.length;
-
-  // Strength of every nation: units in the field plus what its gold could buy.
-  final power = List.filled(nationCount, 0);
-  for (var p = 0; p < s.owner.length; p++) {
-    power[s.owner[p]] += s.units[p];
-  }
-  for (var n = 0; n < nationCount; n++) {
-    power[n] += s.gold[n] ~/ Rules.unitCost;
-  }
+  final view = outlook ?? Outlook(g);
+  final power = view.power;
 
   bool hostile(int p) => s.wars.contains(pairKey(me, s.owner[p]));
 
@@ -84,6 +112,52 @@ Orders planAi(Game g, int me, Rng rng) {
     if (wantPeace) orders.offerPeace.add(e);
   }
 
+  // ------------------------------------------------------------ alliances
+  // [t] worries [n] when they are at war or [t] is a stronger neighbor.
+  final neighborhood = view.neighbors;
+  bool worries(int t, int n) => g.atWar(n, t) || (power[t] > power[n] && neighborhood[n].contains(t));
+  final allies = view.allies[me];
+  final worriers = [
+    for (var t = 0; t < nationCount; t++)
+      if (t != me && s.alive[t] && worries(t, me)) t,
+  ];
+  // A partner is worth having when something worries us both. Never one at
+  // war with an ally, and never a weak neighbor that may be worth a war.
+  bool worthAllying(int c) {
+    for (final a in allies) {
+      if (g.atWar(a, c)) return false;
+    }
+    if (neighborhood[me].contains(c) && power[me] > Rules.aiWarRatio * (power[c] + 1)) return false;
+    for (final t in worriers) {
+      if (t != c && worries(t, c)) return true;
+    }
+    return false;
+  }
+
+  // The cheap tests go first: canOfferAlliance looks at every nation.
+  var allyCount = allies.length;
+  for (var c = 0; c < nationCount; c++) {
+    if (allyCount >= Rules.aiMaxAlliances) break;
+    if (g.hasAllianceOffer(c, me) && worthAllying(c) && g.canOfferAlliance(me, c)) {
+      orders.offerAlliance.add(c);
+      allyCount++;
+    }
+  }
+  if (allyCount < Rules.aiMaxAlliances && rng.chance(0.15)) {
+    var partner = -1;
+    for (var c = 0; c < nationCount; c++) {
+      if (g.askedRecently(me, c) || orders.offerAlliance.contains(c) || !worthAllying(c) || !g.canOfferAlliance(me, c)) continue;
+      if (partner < 0 || power[c] > power[partner]) partner = c;
+    }
+    if (partner >= 0) orders.offerAlliance.add(partner);
+  }
+  // An alliance that no longer guards against anything does not outlast a
+  // long peace: sooner or later the restless side lets it go.
+  final restless = s.turn - s.lastWar[me];
+  for (final a in allies) {
+    if (enemies.isEmpty && restless >= 12 && !worthAllying(a) && rng.chance(0.1)) orders.breakAlliance.add(a);
+  }
+
   // ------------------------------------------------------------ war
   var facing = 0;
   var fronts = 0;
@@ -94,23 +168,32 @@ Orders planAi(Game g, int me, Rng rng) {
   }
   if (power[me] > 1.6 * facing) {
     // The longer the peace, the worse the odds it will go to war on.
-    final restless = s.turn - s.lastWar[me];
     var victim = -1;
     var bestOdds = Rules.aiWarRatio * (1 - math.min(Rules.aiRestlessMax, restless * Rules.aiRestlessPerTurn));
     for (final n in neighbors.toList()..sort()) {
       if (!g.canDeclareWar(me, n)) continue;
-      // A neighbor already fighting others is an easier meal.
+      // A neighbor already fighting others is an easier meal, above all one
+      // fighting my allies. Its own allies come to its aid, at full weight
+      // when they can reach me.
       var distracted = 0;
+      var withAllies = false;
       for (var other = 0; other < nationCount; other++) {
-        if (other != me && s.alive[other] && g.atWar(n, other)) distracted++;
+        if (other == me || !s.alive[other] || !g.atWar(n, other)) continue;
+        distracted++;
+        if (g.allied(me, other)) withAllies = true;
       }
-      final odds = power[me] / (power[n] + 1) * (1 + 0.2 * math.min(distracted, 2)) / (1 + 0.5 * fronts) * rng.range(0.9, 1.1);
+      var defence = power[n].toDouble();
+      for (final ally in g.wouldDefend(me, n, view.allies[n])) {
+        defence += power[ally] * (neighborhood[me].contains(ally) ? 1 : 0.3);
+      }
+      final odds = power[me] / (defence + 1) * (1 + 0.2 * math.min(distracted, 2)) * (withAllies ? 1.3 : 1) / (1 + 0.5 * fronts) * rng.range(0.9, 1.1);
       if (odds > bestOdds) {
         bestOdds = odds;
         victim = n;
       }
     }
-    if (victim >= 0 && rng.chance(enemies.isEmpty ? math.min(0.5, 0.12 + restless * 0.01) : 0.04)) orders.declareWar.add(victim);
+    final eagerness = (enemies.isEmpty ? math.min(0.5, 0.12 + restless * 0.01) : 0.04) * w.aggression;
+    if (victim >= 0 && rng.chance(eagerness)) orders.declareWar.add(victim);
   }
 
   // ------------------------------------------------------------ attacks
@@ -127,8 +210,8 @@ Orders planAi(Game g, int me, Rng rng) {
       for (final q in w.provinces[t].links)
         if (s.owner[q] == me) q,
     ];
-    final need = (g.defenseStrength(t) * Rules.aiAttackMargin).ceil() + 1;
-    final value = w.provinces[t].income * 2.0 + (g.isCapital(t) ? 12 : 0) + sources.length * 1.5 + rng.nextDouble();
+    final need = (g.defenseStrength(t) * Rules.aiAttackMargin / g.armyFactor(me)).ceil() + 1;
+    final value = g.fullIncome(t) * 2.0 + (g.isCapital(t) ? 12 : 0) + sources.length * 1.5 + rng.nextDouble();
     plans.add(_Target(t, need, value / (need + 3), sources));
   }
   plans.sort((a, b) => b.score.compareTo(a.score));
@@ -185,6 +268,8 @@ Orders planAi(Game g, int me, Rng rng) {
     if (steps == null || steps == 0) continue;
     var keep = border.contains(p) ? 2 : 0;
     if (s.capital[me] == p) keep = 3;
+    // Fresh conquests need a garrison as strong as the militia, or they rise.
+    if (g.isOccupied(p)) keep = math.max(keep, g.militia(p));
     // The rest of the front stays half as strong as what faces it.
     if (threat[p]! > 0) keep = math.max(keep, (threat[p]! * 0.5).ceil());
     final send = free[p]! - keep;
@@ -199,13 +284,33 @@ Orders planAi(Game g, int me, Rng rng) {
     free[p] = free[p]! - send;
   }
 
-  // ------------------------------------------------------------ recruiting
-  // Fill up towards the army the income can pay for; in peacetime hold back
-  // and let the treasury grow.
+  // ------------------------------------------------------------ research
+  // Arms while threatened, industry while safe, and less of either at war.
   final income = g.incomeOf(me);
+  var threatened = enemies.isNotEmpty;
+  for (final n in neighbors) {
+    if (power[n] > power[me] && !g.allied(me, n)) threatened = true;
+  }
+  final army = g.techLevel(me, Field.army);
+  final industry = g.techLevel(me, Field.industry);
+  final field = threatened ? (army <= industry + 1 ? Field.army : Field.industry) : (industry <= army + 1 ? Field.industry : Field.army);
+  final share = enemies.isEmpty ? Rules.aiResearchPeace : Rules.aiResearchWar;
+  if (field.index != s.researchFocus[me] || share != s.researchShare[me]) orders.research = ResearchPlan(field, share);
+
+  // ------------------------------------------------------------ recruiting
+  // Fill up towards the army what the income can pay for once research and
+  // forts are paid; in peacetime hold back and let the treasury grow.
+  var troops = 0;
+  var forts = 0;
+  for (final p in mine) {
+    troops += s.units[p];
+    forts += s.forts[p];
+  }
   final mobilised = enemies.isNotEmpty || s.gold[me] > income * Rules.aiFullTreasuryTurns;
-  final ceiling = (income * Rules.unitsPerUpkeepGold * (mobilised ? Rules.aiWarArmy : Rules.aiPeaceArmy)).floor();
-  var budget = math.min(s.gold[me] ~/ Rules.unitCost, ceiling - g.unitsOf(me));
+  final payable = income - g.researchSpend(me, share: share, income: income) - forts * Rules.fortUpkeep;
+  final ceiling = (payable * Rules.unitsPerUpkeepGold * (mobilised ? Rules.aiWarArmy : Rules.aiPeaceArmy)).floor();
+  var budget = math.min(s.gold[me] ~/ Rules.unitCost, ceiling - troops);
+  var purse = s.gold[me];
   if (budget > 0) {
     int gap(int p) => threat[p]! - s.units[p];
     final byNeed = List.of(mine)
@@ -220,8 +325,44 @@ Orders planAi(Game g, int me, Rng rng) {
       final count = math.min(budget, g.recruitCap(p));
       orders.recruits.add(RecruitOrder(p, count));
       budget -= count;
+      purse -= count * Rules.unitCost;
       if (budget == 0) break;
     }
+  }
+
+  // ------------------------------------------------------------ building
+  // What the army leaves over, less a month's income kept in hand, goes into
+  // the land: walls where the enemy masses beyond what the garrison can
+  // hold, and development in the quiet heartland.
+  purse -= income;
+  var bestFort = -1;
+  var bestDanger = 0.8;
+  for (final p in mine) {
+    final danger = threat[p]! / (g.defenseStrength(p) + 1) * (g.isCapital(p) ? 2 : 1);
+    if (danger > bestDanger && g.buildCost(p, Project.fortify) > 0) {
+      bestDanger = danger;
+      bestFort = p;
+    }
+  }
+  if (bestFort >= 0 && g.buildCost(bestFort, Project.fortify) <= purse) {
+    orders.builds.add(BuildOrder(bestFort, Project.fortify));
+    purse -= g.buildCost(bestFort, Project.fortify);
+  }
+  final quiet = [
+    for (final p in mine)
+      if (threat[p] == 0 && !g.isOccupied(p) && g.buildCost(p, Project.develop) > 0 && p != bestFort) p,
+  ]..sort((a, b) {
+      final ca = g.buildCost(a, Project.develop);
+      final cb = g.buildCost(b, Project.develop);
+      if (ca != cb) return ca - cb;
+      if (g.fullIncome(a) != g.fullIncome(b)) return g.fullIncome(b) - g.fullIncome(a);
+      return a - b;
+    });
+  for (final p in quiet.take(enemies.isEmpty ? 3 : 1)) {
+    final cost = g.buildCost(p, Project.develop);
+    if (cost > purse) break;
+    orders.builds.add(BuildOrder(p, Project.develop));
+    purse -= cost;
   }
 
   return orders;

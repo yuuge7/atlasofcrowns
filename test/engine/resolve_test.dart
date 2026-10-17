@@ -7,6 +7,7 @@ import 'package:atlasofcrowns/engine/rng.dart';
 import 'package:atlasofcrowns/engine/resolve.dart';
 import 'package:atlasofcrowns/engine/rules.dart';
 import 'package:atlasofcrowns/engine/state.dart';
+import 'package:atlasofcrowns/engine/world.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
@@ -260,6 +261,396 @@ void main() {
     });
   });
 
+  group('alliances', () {
+    // Three in a row: 0 | 1 | 2, with 1 and 2 allied.
+    final row = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1],
+      ],
+      owners: [0, 1, 2],
+      alliances: [
+        [1, 2],
+      ],
+    );
+
+    test('an ally joins a war declared on its partner', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      expect(g.wouldDefend(0, 1), [2]);
+      final r = turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.atWar(0, 1), isTrue);
+      expect(g.atWar(0, 2), isTrue);
+      final call = r.events.singleWhere((e) => e.kind == EventKind.calledToArms);
+      expect((call.a, call.b, call.n1), (2, 0, 1));
+    });
+
+    test('a war the allies start themselves stays theirs', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {1: Orders()..declareWar.add(0)});
+      expect(g.atWar(0, 1), isTrue);
+      expect(g.atWar(0, 2), isFalse);
+    });
+
+    test('a nation allied to both sides stays out', () {
+      final both = tinyWorld(
+        links: [
+          [1],
+          [0, 2],
+          [1],
+        ],
+        owners: [0, 1, 2],
+        alliances: [
+          [1, 2],
+          [0, 2],
+        ],
+      );
+      final g = gameWith(both, units: [5, 5, 5]);
+      expect(g.canDeclareWar(0, 2), isFalse);
+      turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.atWar(0, 1), isTrue);
+      expect(g.atWar(0, 2), isFalse);
+      expect(g.allied(0, 2), isTrue);
+    });
+
+    test('nobody allies with the enemy of an ally', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      g.state.wars.add(pairKey(0, 2));
+      expect(g.canOfferAlliance(0, 1), isFalse, reason: '1 is allied to 2, at war with 0');
+      expect(g.canOfferAlliance(1, 0), isFalse);
+      turn(g, {
+        0: Orders()..offerAlliance.add(1),
+        1: Orders()..offerAlliance.add(0),
+      });
+      expect(g.allied(0, 1), isFalse);
+    });
+
+    test('an alliance needs both sides', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      final r1 = turn(g, {0: Orders()..offerAlliance.add(1)});
+      expect(g.allied(0, 1), isFalse);
+      expect(has(r1, EventKind.allianceOffered), isTrue);
+      expect(g.hasAllianceOffer(0, 1), isTrue);
+      final r2 = turn(g, {1: Orders()..offerAlliance.add(0)});
+      expect(has(r2, EventKind.allianceSigned), isTrue);
+      expect(g.allied(0, 1), isTrue);
+      expect(g.hasAllianceOffer(0, 1), isFalse);
+      expect(g.canDeclareWar(1, 0), isFalse);
+    });
+
+    test('an alliance offer is remembered for a while after it lapses', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {0: Orders()..offerAlliance.add(1)});
+      for (var i = 0; i < Rules.peaceOfferTurns; i++) {
+        turn(g, {});
+      }
+      expect(g.hasAllianceOffer(0, 1), isFalse);
+      expect(g.askedRecently(0, 1), isTrue);
+      expect(g.askedRecently(1, 0), isFalse);
+      for (var i = 0; i < Rules.aiAllianceRetryTurns; i++) {
+        turn(g, {});
+      }
+      expect(g.askedRecently(0, 1), isFalse);
+      expect(g.state.allianceAsked, isEmpty);
+    });
+
+    test('an ally cannot be attacked in the turn the alliance is left', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      final r = turn(g, {
+        1: Orders()
+          ..breakAlliance.add(2)
+          ..declareWar.add(2),
+      });
+      expect(has(r, EventKind.allianceBroken), isTrue);
+      expect(g.allied(1, 2), isFalse);
+      expect(g.atWar(1, 2), isFalse);
+      turn(g, {1: Orders()..declareWar.add(2)});
+      expect(g.atWar(1, 2), isTrue);
+    });
+
+    test('a war cancels the offers between the two', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {1: Orders()..offerAlliance.add(0)});
+      turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.hasAllianceOffer(1, 0), isFalse);
+      turn(g, {0: Orders()..offerAlliance.add(1)});
+      expect(g.allied(0, 1), isFalse);
+    });
+
+    test('alliances go with a fallen nation', () {
+      final g = gameWith(row, units: [300, 0, 0]);
+      g.state.wars.add(pairKey(0, 1));
+      g.state.alliances.add(pairKey(0, 2));
+      turn(g, {0: Orders()..moves.add(const MoveOrder(0, 1, 300))});
+      expect(g.state.alive[1], isFalse);
+      expect(g.state.alliances, {pairKey(0, 2)});
+    });
+  });
+
+  group('building', () {
+    test('a fort raises the cover, costs gold and upkeep', () {
+      final g = gameWith(line, units: [0, 0, 0, 0], gold: [100, 0]);
+      final before = g.defenseMultiplier(1);
+      turn(g, {0: Orders()..builds.add(const BuildOrder(1, Project.fortify))});
+      expect(g.state.forts[1], 1);
+      expect(g.defenseMultiplier(1), before + Rules.fortBonus);
+      expect(g.upkeepOf(0), Rules.fortUpkeep);
+      expect(g.state.gold[0], 100 - Rules.fortCost + g.incomeOf(0) - Rules.fortUpkeep);
+    });
+
+    test('one project per province, none past the top level or the treasury', () {
+      final g = gameWith(line, units: [0, 0, 0, 0], gold: [1000, 0]);
+      turn(g, {
+        0: Orders()
+          ..builds.add(const BuildOrder(1, Project.fortify))
+          ..builds.add(const BuildOrder(1, Project.develop))
+          ..builds.add(const BuildOrder(2, Project.fortify)),
+      });
+      expect(g.state.forts[1], 1);
+      expect(g.state.development[1], 0);
+      expect(g.state.forts[2], 0);
+      for (var i = 0; i < 4; i++) {
+        turn(g, {0: Orders()..builds.add(const BuildOrder(1, Project.fortify))});
+      }
+      expect(g.state.forts[1], Rules.maxFort);
+      expect(g.buildCost(1, Project.fortify), -1);
+      g.state.gold[0] = Rules.developCost - 1;
+      turn(g, {0: Orders()..builds.add(const BuildOrder(0, Project.develop))});
+      expect(g.state.development[0], 0);
+    });
+
+    test('development adds income, at a rising price', () {
+      final g = gameWith(line, units: [0, 0, 0, 0], gold: [1000, 0]);
+      final income = g.incomeOf(0);
+      final first = g.buildCost(0, Project.develop);
+      turn(g, {0: Orders()..builds.add(const BuildOrder(0, Project.develop))});
+      expect(g.incomeOf(0), income + 1);
+      expect(g.recruitCap(0), Rules.recruitBase + 3);
+      expect(g.buildCost(0, Project.develop), first + Rules.developStep);
+    });
+
+    test('a conquered province yields less at first and loses a fort level', () {
+      final g = gameWith(line, units: [0, 300, 0, 0], gold: [1000, 1000]);
+      g.state.forts[2] = 2;
+      g.state.development[2] = 6;
+      final full = g.fullIncome(2);
+      turn(g, {0: Orders()..moves.add(const MoveOrder(1, 2, 300))});
+      expect(g.state.owner[2], 0);
+      expect(g.state.forts[2], 1);
+      expect(g.isOccupied(2), isTrue);
+      expect(g.provinceIncome(2), lessThan(full));
+      expect(g.provinceIncome(2), greaterThanOrEqualTo((full * Rules.occupiedShare).floor()));
+      for (var i = 0; i < Rules.integrationTurns; i++) {
+        turn(g, {});
+      }
+      expect(g.isOccupied(2), isFalse);
+      expect(g.provinceIncome(2), full);
+    });
+
+    test('a province won back by its first owner yields all at once', () {
+      final g = gameWith(line, units: [0, 0, 0, 300], gold: [1000, 1000]);
+      g.state.owner[2] = 0;
+      g.state.heldSince[2] = 0;
+      expect(g.isOccupied(2), isTrue);
+      turn(g, {1: Orders()..moves.add(const MoveOrder(3, 2, 300))});
+      expect(g.state.owner[2], 1);
+      expect(g.isOccupied(2), isFalse);
+      expect(g.provinceIncome(2), g.fullIncome(2));
+    });
+  });
+
+  group('technology', () {
+    test('research is paid from the surplus and buys levels', () {
+      final g = gameWith(line, units: [0, 0, 0, 0], gold: [0, 0]);
+      final r1 = turn(g, {0: Orders()..research = const ResearchPlan(Field.industry, 50)});
+      expect(g.state.researchFocus[0], Field.industry.index);
+      expect(g.state.researchShare[0], 50);
+      final income = g.incomeOf(0);
+      expect(g.state.research[0][Field.industry.index], income ~/ 2);
+      expect(g.state.gold[0], income - income ~/ 2);
+      expect(has(r1, EventKind.techAdvanced), isFalse);
+      var advanced = false;
+      for (var i = 0; i < 20 && !advanced; i++) {
+        advanced = has(turn(g, {}), EventKind.techAdvanced);
+      }
+      expect(advanced, isTrue);
+      expect(g.techLevel(0, Field.industry), 1);
+      expect(g.state.researchShare[0], 50, reason: 'the plan stands until changed');
+    });
+
+    test('research never leaves an army unpaid', () {
+      final g = gameWith(line, units: [40, 40, 0, 0], gold: [0, 0]);
+      g.state.researchShare[0] = 50;
+      turn(g, {});
+      expect(g.state.research[0], [0, 0]);
+    });
+
+    test('a share that is not on offer is ignored', () {
+      final g = gameWith(line, units: [0, 0, 0, 0]);
+      turn(g, {0: Orders()..research = const ResearchPlan(Field.army, 99)});
+      expect(g.state.researchShare[0], isNot(99));
+    });
+
+    test('army technology makes every unit count for more', () {
+      final g = gameWith(line, units: [0, 100, 49, 0]);
+      final before = g.defenseStrength(2);
+      g.state.tech[1][Field.army.index] = 4;
+      expect(g.defenseStrength(2), (before * (1 + 4 * Rules.armyTechBonus)).round());
+      g.state.tech[1][Field.army.index] = 0;
+      // Even with the worst roll against the best, 100 units at level 10 beat
+      // 49 units and 3 militia dug in at x2.0 in a capital.
+      g.state.tech[0][Field.army.index] = Rules.maxTech;
+      turn(g, {0: Orders()..moves.add(const MoveOrder(1, 2, 100))});
+      expect(g.state.owner[2], 0);
+    });
+
+    test('industry raises the income', () {
+      final g = gameWith(line, units: [0, 0, 0, 0]);
+      final before = g.incomeOf(0);
+      g.state.tech[0][Field.industry.index] = 5;
+      expect(g.incomeOf(0), (before * (1 + 5 * Rules.industryTechBonus)).floor());
+    });
+  });
+
+  group('setup', () {
+    test('difficulty scales what the AI earns, never the player', () {
+      int incomes(int difficulty, int nation) => Game.start(line, human: 0, seed: 1, difficulty: difficulty).incomeOf(nation);
+      expect(incomes(0, 0), incomes(2, 0));
+      expect(incomes(0, 1), lessThan(incomes(1, 1)));
+      expect(incomes(2, 1), greaterThan(incomes(1, 1)));
+      final watching = Game.start(line, human: -1, seed: 1, difficulty: 2);
+      expect(watching.incomeOf(1), incomes(1, 1));
+    });
+
+    test('difficulty leaves the opening position alone', () {
+      final easy = Game.start(line, human: 0, seed: 1, difficulty: 0);
+      final hard = Game.start(line, human: 0, seed: 1, difficulty: 2);
+      expect(hard.state.gold, easy.state.gold);
+      expect(hard.state.units, easy.state.units);
+    });
+
+    test('a nation sees its own land, its allies and one province beyond', () {
+      final row = tinyWorld(
+        links: [
+          [1],
+          [0, 2],
+          [1, 3],
+          [2, 4],
+          [3],
+        ],
+        owners: [0, 1, 1, 2, 2],
+        alliances: [
+          [0, 2],
+        ],
+      );
+      final g = Game.start(row, human: 0, seed: 1, fog: true);
+      expect(g.sightOf(0), [true, true, true, true, true]);
+      g.state.alliances.clear();
+      expect(g.sightOf(0), [true, true, false, false, false]);
+    });
+  });
+
+  group('history', () {
+    World scripted() => tinyWorld(
+          links: [
+            [1],
+            [0, 2],
+            [1],
+          ],
+          owners: [0, 1, 2],
+          history: const [
+            HistoryEvent(turn: 1, text: 'Two joins Nought and attacks One.', alliances: [(2, 0)], wars: [(2, 1)]),
+          ],
+        );
+
+    test('replays on its turn', () {
+      final g = gameWith(scripted(), units: [5, 5, 5]);
+      expect(has(turn(g, {}), EventKind.history), isFalse);
+      final r = turn(g, {});
+      expect(r.events.firstWhere((e) => e.kind == EventKind.history).n1, 0);
+      expect(g.allied(0, 2), isTrue);
+      expect(g.atWar(1, 2), isTrue);
+    });
+
+    test('is skipped once it no longer makes sense', () {
+      final g = gameWith(scripted(), units: [5, 5, 5]);
+      g.state.wars.add(pairKey(0, 2));
+      g.state.alliances.add(pairKey(1, 2));
+      turn(g, {});
+      final r = turn(g, {});
+      expect(has(r, EventKind.history), isFalse);
+      expect(g.allied(0, 2), isFalse);
+      expect(g.atWar(1, 2), isFalse);
+    });
+
+    test('never sends the player to war, only offers the alliance', () {
+      final g = gameWith(scripted(), units: [5, 5, 5], human: 2);
+      turn(g, {});
+      turn(g, {});
+      expect(g.atWar(1, 2), isFalse);
+      expect(g.allied(0, 2), isFalse);
+      expect(g.hasAllianceOffer(0, 2), isTrue);
+    });
+  });
+
+  group('unrest', () {
+    // 0 | 1 | 2: nation 2 starts with province 2 but has lost it to 1.
+    final three = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1],
+      ],
+      owners: [0, 1, 2],
+    );
+
+    Game occupied({required bool fallen, required bool atWar}) {
+      final g = gameWith(three, units: [5, 5, 0]);
+      g.state.owner[2] = 1;
+      g.state.heldSince[2] = 0;
+      if (fallen) {
+        g.state.alive[2] = false;
+        g.state.capital[2] = -1;
+      } else {
+        // Nation 2 keeps a foothold in province 0 for this test.
+        g.state.owner[0] = 2;
+        g.state.capital[2] = 0;
+        g.state.alive[0] = false;
+        g.state.capital[0] = -1;
+      }
+      if (atWar) g.state.wars.add(pairKey(1, 2));
+      return g;
+    }
+
+    test('a garrison as strong as the militia keeps the peace', () {
+      final g = occupied(fallen: true, atWar: false);
+      expect(g.revoltChance(2), greaterThan(0));
+      g.state.units[2] = g.militia(2);
+      expect(g.revoltChance(2), 0);
+    });
+
+    test('land of a nation at peace with the holder stays quiet', () {
+      expect(occupied(fallen: false, atWar: false).revoltChance(2), 0);
+      expect(occupied(fallen: false, atWar: true).revoltChance(2), greaterThan(0));
+    });
+
+    test('a fallen nation rises again, at war with its conqueror', () {
+      final g = occupied(fallen: true, atWar: false);
+      TurnReport? report;
+      for (var i = 0; i < 2000 && g.state.owner[2] == 1; i++) {
+        g.state.heldSince[2] = g.state.turn - 1;
+        report = turn(g, {});
+      }
+      expect(g.state.owner[2], 2);
+      expect(g.state.alive[2], isTrue);
+      expect(g.state.capital[2], 2);
+      expect(g.atWar(1, 2), isTrue);
+      final revolt = report!.events.singleWhere((e) => e.kind == EventKind.revolt);
+      expect(revolt.flag, isTrue);
+      expect(g.state.units[2], revolt.n1);
+    });
+  });
+
   group('economy', () {
     test('income minus upkeep lands in the treasury', () {
       final g = gameWith(line, units: [8, 8, 0, 0], gold: [10, 0]);
@@ -334,6 +725,23 @@ void main() {
     expect(jsonEncode(b.toJson()), jsonEncode(a.toJson()));
   });
 
+  test('a save from before alliances, buildings and research still opens', () {
+    final g = gameWith(line, units: [1, 1, 1, 1]);
+    final json = jsonDecode(jsonEncode(g.toJson())) as Map<String, dynamic>;
+    final state = json['state'] as Map<String, dynamic>;
+    for (final key in ['alliances', 'allianceOffers', 'allianceAsked', 'forts', 'development', 'heldSince', 'tech', 'research', 'researchFocus', 'researchShare', 'difficulty', 'fog']) {
+      expect(state.remove(key), isNotNull, reason: key);
+    }
+    final back = Game.fromJson(line, json);
+    expect(back.state.alliances, isEmpty);
+    expect(back.state.forts, [0, 0, 0, 0]);
+    expect(back.provinceIncome(0), back.fullIncome(0));
+    expect(back.techLevel(0, Field.army), 0);
+    expect(back.state.difficulty, Rules.normalDifficulty);
+    expect(back.state.fog, isFalse);
+    expect(Orders.fromJson({'moves': [], 'recruits': [], 'declareWar': [], 'offerPeace': []}).isEmpty, isTrue);
+  });
+
   test('a save from another map is refused', () {
     final g = gameWith(line, units: [1, 1, 1, 1]);
     final json = g.toJson()..['mapBuild'] = 'older';
@@ -345,7 +753,11 @@ void main() {
       ..moves.add(const MoveOrder(1, 2, 3))
       ..recruits.add(const RecruitOrder(4, 5))
       ..declareWar.add(6)
-      ..offerPeace.add(7);
+      ..offerPeace.add(7)
+      ..offerAlliance.add(8)
+      ..breakAlliance.add(9)
+      ..builds.add(const BuildOrder(10, Project.develop))
+      ..research = const ResearchPlan(Field.industry, 30);
     final back = Orders.fromJson(jsonDecode(jsonEncode(o.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(o.toJson()));
   });

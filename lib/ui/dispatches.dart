@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../engine/events.dart';
+import '../engine/orders.dart';
 import '../engine/world.dart';
 import '../game/game_controller.dart';
 import '../theme.dart';
+import 'research_sheet.dart';
+import 'widgets.dart';
 
 enum Tone { good, bad, plain }
 
+/// An offer the player can answer from the dispatches.
+enum Offer { peace, alliance }
+
 class Dispatch {
-  const Dispatch(this.text, [this.tone = Tone.plain, this.peaceFrom = -1]);
+  const Dispatch(this.text, [this.tone = Tone.plain, this.offer]);
 
   final String text;
   final Tone tone;
 
-  /// Nation whose peace offer this line reports, or -1.
-  final int peaceFrom;
+  /// The offer this line reports and the nation making it, if any.
+  final (Offer, int)? offer;
 }
 
 /// A turn's events as sentences, split into what touched the player and
@@ -44,9 +50,39 @@ class Dispatches {
           }
         case EventKind.peaceOffered:
           if (e.b == human) {
-            yours.add(Dispatch('${nation(e.a)} offers peace.', Tone.plain, e.a));
+            yours.add(Dispatch('${nation(e.a)} offers peace.', Tone.plain, (Offer.peace, e.a)));
           } else if (e.a == human) {
             yours.add(Dispatch('Your peace offer reached ${nation(e.b)}. No answer yet.'));
+          }
+        case EventKind.calledToArms:
+          if (e.a == human) {
+            yours.add(Dispatch('${nation(e.b)} attacked your ally ${nation(e.n1)}. You are at war with ${nation(e.b)}; the border opens next turn.', Tone.bad));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} stands by ${nation(e.n1)} and declares war on you.', Tone.bad));
+          } else if (e.n1 == human) {
+            yours.add(Dispatch('${nation(e.a)} honours the alliance and joins your war against ${nation(e.b)}.', Tone.good));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} joins ${nation(e.n1)} against ${nation(e.b)}.'));
+          }
+        case EventKind.allianceSigned:
+          if (mine) {
+            yours.add(Dispatch('Alliance signed with ${nation(e.a == human ? e.b : e.a)}.', Tone.good));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} and ${nation(e.b)} signed an alliance.'));
+          }
+        case EventKind.allianceOffered:
+          if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} proposes an alliance.', Tone.plain, (Offer.alliance, e.a)));
+          } else if (e.a == human) {
+            yours.add(Dispatch('Your alliance offer reached ${nation(e.b)}. No answer yet.'));
+          }
+        case EventKind.allianceBroken:
+          if (e.a == human) {
+            yours.add(Dispatch('You left the alliance with ${nation(e.b)}.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} left its alliance with you.', Tone.bad));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} left its alliance with ${nation(e.b)}.'));
           }
         case EventKind.battle:
           if (e.a == human) {
@@ -68,10 +104,28 @@ class Dispatches {
           } else {
             elsewhere.add(Dispatch('${world.nations[e.a].name} is no more, conquered by ${nation(e.b)}.'));
           }
+        case EventKind.revolt:
+          final how = e.flag ? '${world.nations[e.a].name} rises again' : 'it goes back to ${nation(e.a)}';
+          if (e.b == human) {
+            yours.add(Dispatch('${place(e.province)} revolted against you: $how, with ${e.n1} rebels.${e.flag ? ' It is at war with you.' : ''}', Tone.bad));
+          } else if (e.a == human) {
+            yours.add(Dispatch('${place(e.province)} rose against ${nation(e.b)} and is yours again, with ${e.n1} rebels under arms.', Tone.good));
+          } else {
+            elsewhere.add(Dispatch('${place(e.province)} revolted against ${nation(e.b)}: $how.'));
+          }
         case EventKind.capitalMoved:
           if (e.a == human) yours.add(Dispatch('Your court moved to ${place(e.province)}.', Tone.bad));
         case EventKind.desertion:
           if (e.a == human) yours.add(Dispatch('${e.n1} units went home unpaid. The treasury is empty.', Tone.bad));
+        case EventKind.techAdvanced:
+          if (e.a == human) {
+            final field = Field.values[e.n1];
+            yours.add(Dispatch('${field == Field.army ? 'Army technology' : 'Industry'} reaches level ${e.n2}: ${techEffect(field, e.n2)}.', Tone.good));
+          }
+        case EventKind.history:
+          final h = world.history[e.n1];
+          final touched = h.alliances.any((p) => p.$1 == human || p.$2 == human) || h.wars.any((p) => p.$1 == human || p.$2 == human);
+          (touched ? yours : elsewhere).add(Dispatch(h.text, Tone.plain));
         case EventKind.gameOver:
           break;
       }
@@ -96,42 +150,25 @@ Future<void> showDispatches(BuildContext context, GameController controller) {
   final report = controller.lastReport;
   if (report == null) return Future.value();
   final dispatches = Dispatches(report, controller.world, controller.human);
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * 0.72),
-    builder: (context) => SafeArea(
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 8, 6),
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Dispatches', style: AtlasText.title),
-                Text('What happened in ${controller.world.dateLabel(report.turn)}', style: AtlasText.note),
-              ]),
-            ),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Close'),
-          ]),
+  return showAtlasSheet<void>(
+    context,
+    (context) => AtlasSheet(
+      title: 'Dispatches',
+      note: 'What happened in ${controller.world.dateLabel(report.turn)}',
+      body: ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) => ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          children: [
+            if (dispatches.isEmpty) const Text('A quiet month. Nothing to report.', style: AtlasText.note),
+            if (dispatches.yours.isNotEmpty) const _Heading('Your realm'),
+            for (final d in dispatches.yours) _Line(d, controller),
+            if (dispatches.elsewhere.isNotEmpty) const _Heading('Elsewhere'),
+            for (final d in dispatches.elsewhere) _Line(d, controller),
+          ],
         ),
-        const Divider(color: AtlasColors.brass),
-        Flexible(
-          child: ListenableBuilder(
-            listenable: controller,
-            builder: (context, _) => ListView(
-              shrinkWrap: true,
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
-              children: [
-                if (dispatches.isEmpty) const Text('A quiet month. Nothing to report.', style: AtlasText.note),
-                if (dispatches.yours.isNotEmpty) const _Heading('Your realm'),
-                for (final d in dispatches.yours) _Line(d, controller),
-                if (dispatches.elsewhere.isNotEmpty) const _Heading('Elsewhere'),
-                for (final d in dispatches.elsewhere) _Line(d, controller),
-              ],
-            ),
-          ),
-        ),
-      ]),
+      ),
     ),
   );
 }
@@ -160,22 +197,25 @@ class _Line extends StatelessWidget {
       Tone.bad => AtlasColors.signal,
       Tone.plain => AtlasColors.baizeLight,
     };
-    final from = dispatch.peaceFrom;
-    final canAnswer = from >= 0 && controller.peaceOffers.contains(from);
-    final accepted = controller.orders.offerPeace.contains(from);
+    Widget? reply;
+    if (dispatch.offer case (final kind, final from)) {
+      final (open, answered, answer) = switch (kind) {
+        Offer.peace => (controller.peaceOffers, controller.orders.offerPeace, controller.setPeaceOffered),
+        Offer.alliance => (controller.allianceOffers, controller.orders.offerAlliance, controller.setAllianceOffered),
+      };
+      if (open.contains(from)) {
+        reply = answered.contains(from)
+            ? OutlinedButton(onPressed: () => answer(from, false), child: const Text('ACCEPTED'))
+            : FilledButton(onPressed: () => answer(from, true), child: const Text('ACCEPT'));
+      }
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(width: 4, height: 20, margin: const EdgeInsets.only(top: 1), color: color),
         const SizedBox(width: 12),
         Expanded(child: Text(dispatch.text, style: AtlasText.body)),
-        if (canAnswer)
-          Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: accepted
-                ? OutlinedButton(onPressed: () => controller.setPeaceOffered(from, false), child: const Text('ACCEPTED'))
-                : FilledButton(onPressed: () => controller.setPeaceOffered(from, true), child: const Text('ACCEPT')),
-          ),
+        if (reply != null) Padding(padding: const EdgeInsets.only(left: 8), child: reply),
       ]),
     );
   }

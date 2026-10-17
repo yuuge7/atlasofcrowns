@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
@@ -66,7 +67,7 @@ class Panel extends StatelessWidget {
       decoration: BoxDecoration(
         color: AtlasColors.baize,
         border: Border(top: ruleOnTop ? rule : BorderSide.none, bottom: ruleOnTop ? BorderSide.none : rule),
-        boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 10)],
+        boxShadow: const [BoxShadow(color: AtlasColors.shadow, blurRadius: 10)],
       ),
       child: Padding(padding: padding, child: child),
     );
@@ -150,5 +151,162 @@ class _AmountPickerState extends State<AmountPicker> {
         ]),
       ],
     );
+  }
+}
+
+/// Opens a sheet from the bottom of the screen, at most [heightFactor] of
+/// its height.
+Future<T?> showAtlasSheet<T>(BuildContext context, WidgetBuilder builder, {double heightFactor = 0.72}) {
+  return showModalBottomSheet<T>(
+    context: context,
+    isScrollControlled: true,
+    constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * heightFactor),
+    builder: builder,
+  );
+}
+
+/// What a bottom sheet holds: its title and a note under it, a close
+/// button, a brass rule, then [body], which takes the room that is left.
+class AtlasSheet extends StatelessWidget {
+  const AtlasSheet({super.key, required this.title, this.note, this.banner, required this.body});
+
+  final String title;
+  final String? note;
+
+  /// Shown between the rule and the body, e.g. an error.
+  final Widget? banner;
+  final Widget body;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 8, 6),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: AtlasText.title),
+                if (note != null) Text(note!, style: AtlasText.note),
+              ]),
+            ),
+            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Close'),
+          ]),
+        ),
+        const Divider(color: AtlasColors.brass),
+        ?banner,
+        Flexible(child: body),
+      ]),
+    );
+  }
+}
+
+/// Asks a question with two answers; true when the player picks [yes].
+/// [danger] paints [yes] in red pencil, for war.
+Future<bool> confirm(BuildContext context, {required String title, required String body, required String no, required String yes, bool danger = false}) async {
+  final answer = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(body),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: Text(no)),
+        FilledButton(
+          style: danger ? FilledButton.styleFrom(backgroundColor: AtlasColors.signal, foregroundColor: AtlasColors.ivory) : null,
+          onPressed: () => Navigator.pop(context, true),
+          child: Text(yes),
+        ),
+      ],
+    ),
+  );
+  return answer ?? false;
+}
+
+/// One choice among several, brass-ringed when [selected]. [idle] fills it
+/// while it is not.
+class ChoiceTile extends StatelessWidget {
+  const ChoiceTile({
+    super.key,
+    required this.selected,
+    required this.onTap,
+    required this.child,
+    this.idle,
+    this.padding = const EdgeInsets.fromLTRB(12, 6, 8, 7),
+    this.label,
+  });
+
+  final bool selected;
+  final VoidCallback onTap;
+  final Widget child;
+  final Color? idle;
+  final EdgeInsets padding;
+
+  /// What a screen reader says for it, in place of [child].
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      excludeSemantics: label != null,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(5),
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            color: selected ? AtlasColors.baizeLight : idle,
+            borderRadius: BorderRadius.circular(5),
+            border: Border.all(color: selected ? AtlasColors.brassBright : AtlasColors.baizeLight, width: selected ? 1.5 : 1),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// The first of [texts] that fits on one line, or the last one cut short.
+/// The choice is worked out again only when the width or the texts change.
+class FirstThatFits extends StatefulWidget {
+  const FirstThatFits(this.texts, {super.key, required this.style}) : assert(texts.length > 0);
+
+  final List<String> texts;
+  final TextStyle style;
+
+  @override
+  State<FirstThatFits> createState() => _FirstThatFitsState();
+}
+
+class _FirstThatFitsState extends State<FirstThatFits> {
+  double _width = -1;
+  TextScaler? _scaler;
+  List<String> _texts = const [];
+  int _chosen = 0;
+
+  int _choose(double width, TextScaler scaler) {
+    for (var i = 0; i < widget.texts.length - 1; i++) {
+      final painter = TextPainter(text: TextSpan(text: widget.texts[i], style: widget.style), maxLines: 1, textDirection: TextDirection.ltr, textScaler: scaler)..layout();
+      final fits = painter.width <= width;
+      painter.dispose();
+      if (fits) return i;
+    }
+    return widget.texts.length - 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(builder: (context, box) {
+      if (box.maxWidth != _width || scaler != _scaler || !listEquals(widget.texts, _texts)) {
+        _width = box.maxWidth;
+        _scaler = scaler;
+        _texts = widget.texts;
+        _chosen = _choose(box.maxWidth, scaler);
+      }
+      return Text(widget.texts[_chosen], style: widget.style, maxLines: 1, overflow: TextOverflow.ellipsis);
+    });
   }
 }

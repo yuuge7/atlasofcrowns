@@ -5,14 +5,17 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/game.dart';
 import '../engine/orders.dart';
-import '../engine/world.dart';
+import 'game_assets.dart';
 
 /// What the load screen shows about a save without opening the game in it.
 class SaveInfo {
-  SaveInfo({required this.id, required this.nation, required this.turn, required this.date, required this.savedAt});
+  SaveInfo({required this.id, required this.scenario, required this.nation, required this.turn, required this.date, required this.savedAt});
 
   /// File name without extension. [SaveStore.autosaveId] for the autosave.
   final String id;
+
+  /// Id of the scenario the game is played in.
+  final String scenario;
 
   /// Index of the player's nation.
   final int nation;
@@ -26,12 +29,15 @@ class SaveInfo {
 }
 
 class LoadedSave {
-  LoadedSave(this.game, this.orders);
+  LoadedSave(this.game, this.orders, [this.marches = const []]);
 
   final Game game;
 
   /// Orders the player had queued when saving.
   final Orders orders;
+
+  /// Marches under way, as [GameController.marchesToJson] wrote them.
+  final List<List<int>> marches;
 }
 
 /// Save files: one JSON document per game in the app's documents folder.
@@ -55,13 +61,13 @@ class SaveStore {
 
   /// Writes the autosave. Writes are queued, so a slow disk never lets an
   /// older turn overwrite a newer one.
-  Future<void> autosave(Game game, Orders orders) => write(autosaveId, game, orders);
+  Future<void> autosave(Game game, Orders orders, {List<List<int>> marches = const []}) => write(autosaveId, game, orders, marches: marches);
 
   /// Saves under a new name and returns its id. The oldest manual save goes
   /// when there are more than [maxManualSaves].
-  Future<String> saveNew(Game game, Orders orders) async {
+  Future<String> saveNew(Game game, Orders orders, {List<List<int>> marches = const []}) async {
     final id = 'save_${DateTime.now().millisecondsSinceEpoch}';
-    await write(id, game, orders);
+    await write(id, game, orders, marches: marches);
     final manual = (await list()).where((s) => !s.isAutosave).toList();
     for (final old in manual.skip(maxManualSaves)) {
       await delete(old.id);
@@ -69,7 +75,7 @@ class SaveStore {
     return id;
   }
 
-  Future<void> write(String id, Game game, Orders orders) {
+  Future<void> write(String id, Game game, Orders orders, {List<List<int>> marches = const []}) {
     final text = jsonEncode({
       'version': 1,
       'savedAt': DateTime.now().toIso8601String(),
@@ -78,6 +84,7 @@ class SaveStore {
       'date': game.world.dateLabel(game.state.turn),
       'game': game.toJson(),
       'orders': orders.toJson(),
+      'marches': marches,
     });
     return _pending = _pending.catchError((_) {}).then((_) async {
       final dir = await _dir();
@@ -100,6 +107,8 @@ class SaveStore {
         final json = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         saves.add(SaveInfo(
           id: file.uri.pathSegments.last.replaceAll('.json', ''),
+          // Saves from before there was a choice are all 1914.
+          scenario: (json['game'] as Map<String, dynamic>)['scenario'] as String? ?? '1914',
           nation: json['nation'] as int,
           turn: json['turn'] as int,
           date: json['date'] as String,
@@ -113,9 +122,10 @@ class SaveStore {
     return saves;
   }
 
-  /// Opens a save. Throws [FormatException] when the file is damaged or was
-  /// made for another version of the map.
-  Future<LoadedSave> load(String id, World world) async {
+  /// Opens a save in whichever of the [assets] scenarios it was made in.
+  /// Throws [FormatException] when the file is damaged or was made for
+  /// another version of the map.
+  Future<LoadedSave> load(String id, GameAssets assets) async {
     await _pending.catchError((_) {});
     final file = _file(await _dir(), id);
     final Object? json;
@@ -126,7 +136,13 @@ class SaveStore {
     }
     if (json is! Map<String, dynamic>) throw const FormatException('The save file is damaged');
     try {
-      return LoadedSave(Game.fromJson(world, json['game'] as Map<String, dynamic>), Orders.fromJson(json['orders'] as Map<String, dynamic>));
+      final game = json['game'] as Map<String, dynamic>;
+      return LoadedSave(
+        Game.fromJson(assets.scenario(game['scenario'] as String), game),
+        Orders.fromJson(json['orders'] as Map<String, dynamic>),
+        // Saves from before marches have none.
+        [for (final m in json['marches'] as List? ?? const []) (m as List).cast<int>()],
+      );
     } on TypeError {
       throw const FormatException('The save file is damaged');
     }

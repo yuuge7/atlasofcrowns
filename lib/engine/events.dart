@@ -12,6 +12,19 @@ enum EventKind {
   /// [GameEvent.a] offers peace to [GameEvent.b], who has not answered yet.
   peaceOffered,
 
+  /// [GameEvent.a] went to war with [GameEvent.b] because [GameEvent.b]
+  /// declared war on [GameEvent.n1], an ally of [GameEvent.a].
+  calledToArms,
+
+  /// [GameEvent.a] and [GameEvent.b] signed an alliance.
+  allianceSigned,
+
+  /// [GameEvent.a] offers an alliance to [GameEvent.b], who has not answered yet.
+  allianceOffered,
+
+  /// [GameEvent.a] left its alliance with [GameEvent.b].
+  allianceBroken,
+
   /// [GameEvent.a] attacked [GameEvent.b] in [GameEvent.province] with
   /// [GameEvent.n1] units against [GameEvent.n2]; the winner kept
   /// [GameEvent.n3]. [GameEvent.flag] is true when the attacker won.
@@ -26,8 +39,20 @@ enum EventKind {
   /// [GameEvent.a] moved its capital to [GameEvent.province].
   capitalMoved,
 
+  /// [GameEvent.province] rose against [GameEvent.b] and went back to
+  /// [GameEvent.a], with [GameEvent.n1] rebels. [GameEvent.flag] is true
+  /// when [GameEvent.a] had fallen and rises again from it.
+  revolt,
+
   /// [GameEvent.a] could not pay its army; [GameEvent.n1] units left.
   desertion,
+
+  /// [GameEvent.a] reached level [GameEvent.n2] in the research field with
+  /// index [GameEvent.n1].
+  techAdvanced,
+
+  /// The scripted event [World.history] at index [GameEvent.n1] took place.
+  history,
 
   /// [GameEvent.a] won, or -1 when the human player was wiped out.
   gameOver,

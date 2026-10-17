@@ -25,6 +25,49 @@ class RecruitOrder {
   static RecruitOrder fromJson(List<dynamic> j) => RecruitOrder(j[0] as int, j[1] as int);
 }
 
+/// What can be built in a province.
+enum Project {
+  /// One more level of fort.
+  fortify,
+
+  /// One more level of development: +1 income.
+  develop,
+}
+
+/// What can be researched.
+enum Field {
+  /// Every unit fights harder.
+  army,
+
+  /// Every province yields more.
+  industry,
+}
+
+/// Where research goes from this turn on, and how much of the income.
+class ResearchPlan {
+  const ResearchPlan(this.field, this.share);
+
+  final Field field;
+
+  /// Percent of income, one of [Rules.researchShares].
+  final int share;
+
+  List<int> toJson() => [field.index, share];
+
+  static ResearchPlan fromJson(List<dynamic> j) => ResearchPlan(Field.values[j[0] as int], j[1] as int);
+}
+
+class BuildOrder {
+  const BuildOrder(this.province, this.project);
+
+  final int province;
+  final Project project;
+
+  List<int> toJson() => [province, project.index];
+
+  static BuildOrder fromJson(List<dynamic> j) => BuildOrder(j[0] as int, Project.values[j[1] as int]);
+}
+
 class Orders {
   Orders();
 
@@ -32,12 +75,19 @@ class Orders {
     return Orders()
       ..moves.addAll([for (final m in j['moves'] as List) MoveOrder.fromJson(m as List)])
       ..recruits.addAll([for (final r in j['recruits'] as List) RecruitOrder.fromJson(r as List)])
+      ..builds.addAll([for (final b in j['builds'] as List? ?? const []) BuildOrder.fromJson(b as List)])
       ..declareWar.addAll((j['declareWar'] as List).cast<int>())
-      ..offerPeace.addAll((j['offerPeace'] as List).cast<int>());
+      ..offerPeace.addAll((j['offerPeace'] as List).cast<int>())
+      ..offerAlliance.addAll((j['offerAlliance'] as List? ?? const []).cast<int>())
+      ..breakAlliance.addAll((j['breakAlliance'] as List? ?? const []).cast<int>())
+      ..research = j['research'] == null ? null : ResearchPlan.fromJson(j['research'] as List);
   }
 
   final List<MoveOrder> moves = [];
   final List<RecruitOrder> recruits = [];
+
+  /// At most one per province counts.
+  final List<BuildOrder> builds = [];
 
   /// Nations to declare war on. Takes effect at the end of this turn; armies
   /// may cross the border from the next one.
@@ -46,12 +96,26 @@ class Orders {
   /// Nations to offer peace to, or whose standing offer is accepted.
   final Set<int> offerPeace = {};
 
-  bool get isEmpty => moves.isEmpty && recruits.isEmpty && declareWar.isEmpty && offerPeace.isEmpty;
+  /// Nations to offer an alliance to, or whose standing offer is accepted.
+  final Set<int> offerAlliance = {};
+
+  /// Allies to part ways with.
+  final Set<int> breakAlliance = {};
+
+  /// A new research plan, or null to keep the current one.
+  ResearchPlan? research;
+
+  bool get isEmpty =>
+      moves.isEmpty && recruits.isEmpty && builds.isEmpty && declareWar.isEmpty && offerPeace.isEmpty && offerAlliance.isEmpty && breakAlliance.isEmpty && research == null;
 
   Map<String, dynamic> toJson() => {
         'moves': [for (final m in moves) m.toJson()],
         'recruits': [for (final r in recruits) r.toJson()],
+        'builds': [for (final b in builds) b.toJson()],
         'declareWar': declareWar.toList(),
         'offerPeace': offerPeace.toList(),
+        'offerAlliance': offerAlliance.toList(),
+        'breakAlliance': breakAlliance.toList(),
+        'research': research?.toJson(),
       };
 }

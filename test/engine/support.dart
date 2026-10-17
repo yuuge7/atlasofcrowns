@@ -6,9 +6,11 @@ import 'package:atlasofcrowns/engine/state.dart';
 import 'package:atlasofcrowns/engine/world.dart';
 
 /// The real map and scenario, straight from the asset files.
-World loadEurope1914() => World.fromJson(
+World loadEurope1914() => loadScenario('1914');
+
+World loadScenario(String id) => World.fromJson(
       jsonDecode(File('assets/map/europe.json').readAsStringSync()) as Map<String, dynamic>,
-      jsonDecode(File('assets/scenarios/1914.json').readAsStringSync()) as Map<String, dynamic>,
+      jsonDecode(File('assets/scenarios/$id.json').readAsStringSync()) as Map<String, dynamic>,
     );
 
 /// A hand-made world. [links] lists each province's neighbors, [owners] who
@@ -18,6 +20,8 @@ World tinyWorld({
   required List<int> owners,
   List<int>? income,
   List<List<int>> wars = const [],
+  List<List<int>> alliances = const [],
+  List<HistoryEvent> history = const [],
 }) {
   final nationCount = owners.reduce((a, b) => a > b ? a : b) + 1;
   return World(
@@ -36,6 +40,8 @@ World tinyWorld({
     ],
     startOwners: owners,
     startWars: wars,
+    startAlliances: alliances,
+    history: history,
   );
 }
 

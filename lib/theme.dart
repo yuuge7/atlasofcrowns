@@ -16,8 +16,26 @@ abstract final class AtlasColors {
   /// Red pencil: the enemy, attacks, war.
   static const signal = Color(0xFFC7402F);
 
+  /// The red pencil lightened for text on baize: warnings, enemies, losses.
+  static const signalText = Color(0xFFF08A75);
+
+  /// What a HUD surface casts on the map.
+  static const shadow = Color(0x66000000);
+
   /// Blue pencil: your own movements.
   static const staffBlue = Color(0xFF2F6FBF);
+
+  // Map modes. Diplomacy: how each nation stands with the player.
+  static const mapYou = Color(0xFFE6C877);
+  static const mapAlly = Color(0xFF7FA3D3);
+  static const mapEnemy = Color(0xFFCF6B5A);
+  static const mapTruce = Color(0xFFA9AE9F);
+  static const mapNeutral = Color(0xFFDCD3BD);
+
+  /// Economy: ivory for the poorest land, through brass, to dark bronze.
+  static const mapPoor = Color(0xFFEFE7D3);
+  static const mapMiddling = Color(0xFFC8A24A);
+  static const mapRich = Color(0xFF5E4519);
 
   static const sea = Color(0xFFA8C5CB);
   static const seaLine = Color(0xFFB9D2D6);
@@ -118,6 +136,16 @@ ThemeData buildAtlasTheme() {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5), side: const BorderSide(color: AtlasColors.brass)),
     ),
   );
+}
+
+/// Income at which the economy map turns brass; twice this is dark bronze.
+const int incomeMiddling = 12;
+
+/// Income [income] on the economy map: ivory at nothing, brass at
+/// [incomeMiddling], dark bronze at twice that and above.
+Color incomeColor(int income) {
+  final t = (income / (2 * incomeMiddling)).clamp(0.0, 1.0);
+  return t < 0.5 ? Color.lerp(AtlasColors.mapPoor, AtlasColors.mapMiddling, t * 2)! : Color.lerp(AtlasColors.mapMiddling, AtlasColors.mapRich, t * 2 - 1)!;
 }
 
 /// Black or ivory, whichever reads on [background].

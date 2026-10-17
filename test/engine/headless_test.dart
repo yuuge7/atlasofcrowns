@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:atlasofcrowns/engine/events.dart';
 import 'package:atlasofcrowns/engine/game.dart';
 import 'package:atlasofcrowns/engine/rng.dart';
+import 'package:atlasofcrowns/engine/world.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support.dart';
@@ -43,6 +44,73 @@ void main() {
       expect(g.state.owner[n.capital], n.id, reason: n.name);
     }
     expect(g.state.wars.length, world.startWars.length);
+  });
+
+  test('the history of 1914 names nations and turns that exist', () {
+    expect(world.history, isNotEmpty);
+    for (final h in world.history) {
+      expect(h.turn, greaterThan(0));
+      for (final (a, b) in [...h.alliances, ...h.wars]) {
+        expect(a, inInclusiveRange(0, world.nations.length - 1));
+        expect(b, inInclusiveRange(0, world.nations.length - 1));
+      }
+    }
+    final ottomans = world.history.first;
+    expect(world.dateLabel(ottomans.turn), 'Nov 1914');
+  });
+
+  test('1914 opens with the Entente and the Central Powers bound', () {
+    final g = Game.start(world, human: -1, seed: 1);
+    int tag(String t) => world.nations.firstWhere((n) => n.tag == t).id;
+    expect(g.allied(tag('FRA'), tag('RUS')), isTrue);
+    expect(g.allied(tag('UKG'), tag('FRA')), isTrue);
+    expect(g.allied(tag('GER'), tag('AUS')), isTrue);
+    expect(g.allied(tag('GER'), tag('FRA')), isFalse);
+    for (final key in g.state.alliances) {
+      expect(g.state.wars, isNot(contains(key)));
+    }
+  });
+
+  group('Europe today', () {
+    final modern = loadScenario('modern');
+
+    test('shares the map and names it for today', () {
+      expect(modern.mapBuild, world.mapBuild);
+      expect(modern.provinces.length, world.provinces.length);
+      String name(World w, int p) => w.provinces[p].name;
+      final istanbul = modern.provinces.indexWhere((p) => p.name == 'Istanbul');
+      expect(istanbul, greaterThanOrEqualTo(0));
+      expect(name(world, istanbul), 'Constantinople');
+      expect(modern.nations.length, lessThan(256));
+      expect(modern.aggression, lessThan(world.aggression));
+    });
+
+    test('every nation starts alive, at peace, holding its capital', () {
+      final g = Game.start(modern, human: -1, seed: 1);
+      checkInvariants(g);
+      expect(g.state.wars, isEmpty);
+      for (final n in modern.nations) {
+        expect(g.state.alive[n.id], isTrue, reason: n.name);
+        expect(g.state.owner[n.capital], n.id, reason: n.name);
+      }
+      int tag(String t) => modern.nations.firstWhere((n) => n.tag == t).id;
+      expect(g.allied(tag('POL'), tag('FRA')), isTrue);
+      expect(g.allied(tag('RUS'), tag('BLR')), isTrue);
+      expect(g.allied(tag('RUS'), tag('POL')), isFalse);
+    });
+
+    for (final seed in [1, 2]) {
+      test('200 turns of AI against AI, seed $seed: no crash', () {
+        final g = Game.start(modern, human: -1, seed: seed, winFraction: 0.95);
+        var captures = 0;
+        while (g.state.turn < 200 && !g.state.ended) {
+          final report = g.endTurn(null);
+          checkInvariants(g);
+          captures += report.events.where((e) => e.kind == EventKind.captured).length;
+        }
+        expect(captures, greaterThan(0));
+      });
+    }
   });
 
   test('the generator repeats itself for a seed', () {

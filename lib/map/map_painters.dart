@@ -25,12 +25,20 @@ class MapOverlay extends ChangeNotifier {
   Set<int> targets = const {};
   List<MapArrow> arrows = const [];
 
-  /// Units per province, or null to hide the counters (menus).
+  /// The road still ahead of each march, after this turn's step: provinces
+  /// from the step's end to the destination.
+  List<List<int>> marches = const [];
+
+  /// Units per province, or null to hide the counters (menus). A negative
+  /// count is an army the player cannot see.
   List<int>? units;
 
   /// Units ordered but not yet raised, shown as "+n".
   Map<int, int> recruits = const {};
   Set<int> capitals = const {};
+
+  /// Fort level of each province, or empty for none anywhere.
+  List<int> forts = const [];
 
   /// Provinces that just changed hands, and how far their flash has faded (1 to 0).
   Set<int> flashing = const {};
@@ -94,7 +102,7 @@ class MapBasePainter extends CustomPainter {
     // Nation names show while they are a readable size, then make way for
     // the provinces as the player closes in.
     final visible = camera.visibleMap;
-    for (final label in scene.lettering) {
+    for (final label in scene.lettered ? scene.lettering : const <NationLettering>[]) {
       final onScreen = label.fontSize * scale;
       final alpha = math.min(((onScreen - 8) / 4).clamp(0.0, 1.0), ((70 - onScreen) / 18).clamp(0.0, 1.0)) * 0.5;
       if (alpha <= 0) continue;
@@ -178,6 +186,9 @@ class MapOverlayPainter extends CustomPainter {
     canvas.restore();
 
     // ---- orders
+    for (final road in overlay.marches) {
+      _drawRoad(canvas, [for (final p in road) camera.toScreen(geometry.provinces[p].label)], Offset.zero & size);
+    }
     for (final arrow in overlay.arrows) {
       _drawArrow(canvas, camera.toScreen(geometry.provinces[arrow.from].label), camera.toScreen(geometry.provinces[arrow.to].label), arrow);
     }
@@ -193,20 +204,21 @@ class MapOverlayPainter extends CustomPainter {
       final at = camera.toScreen(p.label);
       var nameTop = at.dy - 6;
       if (units != null) {
-        _drawCounter(canvas, at, units[p.id], scene.colorOf(owners[p.id]), overlay.recruits[p.id] ?? 0, overlay.capitals.contains(p.id));
+        final fort = overlay.forts.isEmpty ? 0 : overlay.forts[p.id];
+        _drawCounter(canvas, at, units[p.id], scene.colorOf(owners[p.id]), overlay.recruits[p.id] ?? 0, overlay.capitals.contains(p.id), fort);
         nameTop = at.dy + 11;
       }
       if (onScreen >= 30 || picked) {
-        final ink = inkOn(scene.colorOf(owners[p.id]));
+        final ink = inkOn(scene.fillOf(p.id));
         final name = _layout(scene.world.provinces[p.id].name, _nameStyle.copyWith(color: ink.withValues(alpha: 0.85)), ink == AtlasColors.ink ? 'n0' : 'n1');
         if (name.width < onScreen * 3.2 || picked) name.paint(canvas, Offset(at.dx - name.width / 2, nameTop));
       }
     }
   }
 
-  void _drawCounter(Canvas canvas, Offset at, int count, Color color, int recruits, bool capital) {
+  void _drawCounter(Canvas canvas, Offset at, int count, Color color, int recruits, bool capital, int fort) {
     final ink = inkOn(color);
-    final number = _layout('$count', _counterStyle.copyWith(color: ink), ink == AtlasColors.ink ? 'c0' : 'c1');
+    final number = _layout(count < 0 ? '?' : '$count', _counterStyle.copyWith(color: ink), ink == AtlasColors.ink ? 'c0' : 'c1');
     final width = math.max(number.width + 9, 20.0);
     final plate = RRect.fromRectAndRadius(Rect.fromCenter(center: at, width: width, height: 17), const Radius.circular(3));
     canvas.drawRRect(plate.shift(const Offset(0, 1.2)), Paint()..color = const Color(0x55000000));
@@ -219,12 +231,59 @@ class MapOverlayPainter extends CustomPainter {
           ..color = AtlasColors.ink);
     number.paint(canvas, Offset(at.dx - number.width / 2, at.dy - number.height / 2));
     if (capital) _drawCrown(canvas, Offset(at.dx, plate.top - 1.5));
+    if (fort > 0) _drawFort(canvas, Offset(plate.left - 1, plate.bottom + 1), fort);
     if (recruits > 0) {
       final plus = _layout('+$recruits', _counterStyle.copyWith(color: AtlasColors.ink, fontSize: 11), 'r');
       final tag = RRect.fromRectAndRadius(Rect.fromLTWH(plate.right - 3, plate.top - 8, plus.width + 6, 13), const Radius.circular(3));
       canvas.drawRRect(tag, Paint()..color = AtlasColors.brassBright);
       plus.paint(canvas, Offset(tag.left + 3, tag.top + 1));
     }
+  }
+
+  /// A crenellated tower standing on the origin's line, its right foot at
+  /// [right].
+  static Path _tower(double right, double width, double height) {
+    final left = right - width;
+    final merlon = width / 5;
+    return Path()
+      ..moveTo(left, 0)
+      ..lineTo(left, -height)
+      ..lineTo(left + merlon, -height)
+      ..lineTo(left + merlon, 2.2 - height)
+      ..lineTo(left + merlon * 2, 2.2 - height)
+      ..lineTo(left + merlon * 2, -height)
+      ..lineTo(left + merlon * 3, -height)
+      ..lineTo(left + merlon * 3, 2.2 - height)
+      ..lineTo(left + merlon * 4, 2.2 - height)
+      ..lineTo(left + merlon * 4, -height)
+      ..lineTo(right, -height)
+      ..lineTo(right, 0)
+      ..close();
+  }
+
+  /// The towers of a fort and of a fortress, back to front, right foot at
+  /// the origin.
+  static final List<List<Path>> _forts = [
+    [_tower(0, 9, 10)],
+    [_tower(-6, 8, 13), _tower(0, 9, 10)],
+  ];
+  static final Paint _towerFill = Paint()..color = AtlasColors.ivory;
+  static final Paint _towerEdge = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1
+    ..strokeJoin = StrokeJoin.miter
+    ..color = AtlasColors.ink;
+
+  /// A crenellated tower at the lower left of the counter, its right foot
+  /// at [foot]; a fortress gets a second, taller one.
+  void _drawFort(Canvas canvas, Offset foot, int level) {
+    canvas.save();
+    canvas.translate(foot.dx, foot.dy);
+    for (final tower in _forts[math.min(level, _forts.length) - 1]) {
+      canvas.drawPath(tower, _towerFill);
+      canvas.drawPath(tower, _towerEdge);
+    }
+    canvas.restore();
   }
 
   /// A three-pointed crown sitting on the counter of a capital.
@@ -246,6 +305,44 @@ class MapOverlayPainter extends CustomPainter {
           ..strokeWidth = 1
           ..strokeJoin = StrokeJoin.round
           ..color = AtlasColors.ink);
+  }
+
+  static final Paint _roadPencil = Paint()
+    ..style = PaintingStyle.stroke
+    ..color = AtlasColors.staffBlue
+    ..strokeWidth = 3
+    ..strokeCap = StrokeCap.round;
+  static final Paint _ringUnder = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 5
+    ..color = AtlasColors.ivory;
+  static final Paint _ringOver = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 3
+    ..color = AtlasColors.staffBlue;
+
+  /// A march's road ahead: blue pencil dashes from province to province and
+  /// a ring at the destination. Stretches off [screen] are left out.
+  void _drawRoad(Canvas canvas, List<Offset> points, Rect screen) {
+    if (points.length < 2) return;
+    final dashes = Path();
+    for (var i = 1; i < points.length; i++) {
+      final a = points[i - 1];
+      final b = points[i];
+      final length = (b - a).distance;
+      if (length < 1 || !Rect.fromPoints(a, b).inflate(2).overlaps(screen)) continue;
+      final unit = (b - a) / length;
+      for (var d = 0.0; d < length; d += 11) {
+        final from = a + unit * d;
+        final to = a + unit * math.min(d + 6, length);
+        dashes
+          ..moveTo(from.dx, from.dy)
+          ..lineTo(to.dx, to.dy);
+      }
+    }
+    canvas.drawPath(dashes, _roadPencil);
+    canvas.drawCircle(points.last, 9, _ringUnder);
+    canvas.drawCircle(points.last, 9, _ringOver);
   }
 
   void _drawArrow(Canvas canvas, Offset from, Offset to, MapArrow arrow) {

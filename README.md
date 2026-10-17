@@ -1,16 +1,21 @@
 # Atlas of Crowns
 
 A turn-based grand strategy game for Android phones, played on a map of
-Europe and the Mediterranean in August 1914. Choose one of 23 nations, raise
-armies, march them across 327 provinces and hold enough of the map to win.
-Every other nation is played by the AI, and all of them move at the same
-moment when the turn ends.
+Europe and the Mediterranean. Start in August 1914 with the Great War under
+way, or in today's Europe at peace. Choose a nation, raise armies, build
+forts, research, make alliances, march across 327 provinces and hold enough
+of the map to win. Every other nation is played by the AI, and all of them
+move at the same moment when the turn ends.
 
 <p>
   <img src="docs/screenshots/menu.png" width="200" alt="Title screen over the 1914 map">
-  <img src="docs/screenshots/choose-nation.png" width="200" alt="Choosing a nation by tapping it on the map">
-  <img src="docs/screenshots/map.png" width="200" alt="The game map with army counters">
-  <img src="docs/screenshots/attack.png" width="200" alt="Ordering an attack, with the odds shown">
+  <img src="docs/screenshots/choose-nation.png" width="200" alt="Choosing a scenario, a nation and the game settings">
+  <img src="docs/screenshots/map.png" width="200" alt="The game map with army counters, forts and a march under way">
+</p>
+<p>
+  <img src="docs/screenshots/attack.png" width="200" alt="Ordering an attack on a fort, with the odds shown">
+  <img src="docs/screenshots/diplomacy.png" width="200" alt="The diplomatic map under fog of war">
+  <img src="docs/screenshots/research.png" width="200" alt="Research in army and industry">
 </p>
 
 ## Contents
@@ -32,22 +37,43 @@ moment when the turn ends.
 - **A real map.** 327 provinces cut from Natural Earth data and redrawn to
   the borders of 1914: Alsace-Lorraine is German, Galicia is Austrian,
   Congress Poland is Russian, Libya is Italian.
+- **Two scenarios on it.** *The Great War* opens in August 1914 with 23
+  nations, the wars of that month already declared, the Entente and the
+  Central Powers bound by treaty and the great fortresses manned. *Europe
+  today* opens in January 2026 with 58 nations at peace, NATO bound together
+  and the AI slow to start wars: the player sets the pace.
+- **History, if it still fits.** In 1914 the Ottomans, Italy, Bulgaria,
+  Romania and Greece enter the war in the months they did, as long as the
+  game still looks enough like history for it to make sense. A player's
+  nation is never pushed into a war; it is offered the alliance instead.
 - **Simultaneous turns.** Everyone's orders resolve at once. Reinforcements
   arrive before attacks, and an army that marches away no longer defends.
-- **Twenty-three playable nations**, from the Russian Empire to Luxembourg,
-  with the historical wars of August 1914 already under way.
+- **Alliances.** Propose one, accept one, leave one. Declare war on a nation
+  and its allies declare war on you in the same turn.
+- **Forts and development.** Build a fort or a fortress in a province, or
+  develop it for more income.
+- **Research.** Put a share of the income into army technology (every unit
+  fights harder) or industry (every province yields more).
+- **Conquest has a price.** Taken land yields half its income at first and
+  may revolt while its garrison is weak, back to its old owner or as a
+  fallen nation risen again.
+- **Long marches.** Send an army to any of your provinces, however far; it
+  walks there on its own, one province a turn.
+- **Map modes.** Political, diplomatic (allies, enemies, truces) and economic.
+- **Your game, your rules.** Three lengths, three difficulties (the AI earns
+  80%, 100% or 125%), fog of war on or off.
 - **An AI for every nation.** It holds its fronts, attacks what it can
-  overwhelm, gathers its army when it cannot, sues for peace when a war goes
-  nowhere and grows bolder the longer it sits idle.
-- **War, peace and truces.** No alliances yet: every war is one against one.
+  overwhelm, gathers its army when it cannot, seeks allies against a shared
+  threat, garrisons its conquests, builds, researches, sues for peace when a
+  war goes nowhere and grows bolder the longer it sits idle.
 - **Readable combat.** The sheet shows what a province defends with and the
   odds of the attack you are about to order.
 - **Saves.** The game saves itself every turn; manual saves on top.
 - **Built for one hand.** Portrait only, map edge to edge, End turn under the
   right thumb.
 
-Not in the game yet: alliances, technology, buildings, events, navies, other
-scenarios.
+Not in the game yet: navies and sea zones, peace terms beyond the front line,
+vassals, sound, other maps.
 
 ## Install
 
@@ -61,11 +87,14 @@ older one and keeps your saved games.
 
 ## How to play
 
-1. **Pick a nation** by tapping it on the map, choose how many provinces win
-   the game, and start.
-2. **Give orders.** Tap one of your provinces to recruit there or to move its
-   units to a neighbouring province. Moving into a province of a nation you
-   are at war with is an attack. Blue arrows are marches, red arrows attacks.
+1. **Pick a scenario and a nation** by tapping it on the map, set the length,
+   difficulty and fog of war, and start.
+2. **Give orders.** Tap one of your provinces to recruit, build or move its
+   units: to a neighbouring province, or to any province of yours further off
+   for a march of several turns. Moving into a province of a nation you are
+   at war with is an attack. Blue arrows are marches, red arrows attacks.
+   Tap a foreign province for diplomacy. The flask opens research, the globe
+   the list of powers, the layers button the map modes.
 3. **End the turn.** All nations move at once, battles are fought, and the
    dispatches tell you what happened.
 
@@ -74,8 +103,11 @@ older one and keeps your saved games.
 | Recruiting | 4 gold per unit. A province raises up to 2 plus its income each turn. New units defend at once and march from the next turn. |
 | Upkeep | Every 4 units cost 1 gold a turn. An empty treasury makes units desert. |
 | Movement | One province a turn, across a border or a strait marked with a dotted line. |
-| Battle | Attackers must beat the defenders plus the province's militia, multiplied by 1.5 for being dug in (2.0 in a capital). Each side then rolls 15% up or down. The loser is destroyed. |
-| Diplomacy | Tap a foreign province to declare war on its owner; the border opens the turn after. Peace needs both sides and is followed by a truce of 8 turns. |
+| Battle | Attackers must beat the defenders plus the province's militia, multiplied by 1.5 for being dug in, 0.5 more per fort level and 0.5 more in a capital. Army technology adds 5% per level to either side. Each side then rolls 15% up or down. The loser is destroyed. |
+| Diplomacy | Tap a foreign province to declare war on its owner; the border opens the turn after, and the owner's allies join at once. Peace needs both sides and is followed by a truce of 8 turns. An alliance needs both sides too. |
+| Building | One project per province a turn. A fort level costs 40 gold times the level and 1 gold a turn; a province falls with one level less. Development adds 1 income for 20 gold, 15 more for each further level, up to 5. |
+| Research | A share of income (0 to 50%) goes into army or industry. A level costs 2 turns of income times the level reached. Army: +5% strength a level. Industry: +4% income a level. |
+| Conquest | Land taken from its owner at the start yields 50% of its income, rising to all of it over 24 turns. Until then, held with fewer units than its militia, it may revolt. |
 | Winning | Hold the chosen share of all provinces. Lose your last province and the game is over. |
 
 The same rules are in the game under **How to play**.
@@ -124,7 +156,7 @@ flutter build apk --release
 |---|---|
 | `flutter analyze` | Static analysis. Must report no issues. |
 | `flutter test` | Rules, saves, map geometry, camera, UI flows, headless games. |
-| `dart run tool/sim.dart 300 1` | Plays AI against AI for 300 turns with seed 1 and prints the standings. Use it to judge a balance change. |
+| `dart run tool/sim.dart 300 1` | Plays AI against AI for 300 turns with seed 1 and prints the standings. Use it to judge a balance change. Further arguments: win share, report interval, scenario (`dart run tool/sim.dart 300 1 0.95 25 modern`). |
 | `tool/emu.sh install release` | Builds the APK and installs it over adb. |
 | `tool/emu.sh start` / `shot f.png` / `tap x y` / `log` | Drives the installed app on an emulator or phone. Run `tool/emu.sh` alone for the full list. |
 
@@ -149,11 +181,14 @@ lib/
   ui/         Screens and sheets
   theme.dart  Colours, fonts and text styles
 assets/
-  map/europe.json         province shapes and adjacency   (generated)
-  scenarios/1914.json     nations, owners, income, wars    (generated)
+  map/europe.json         province shapes and adjacency                 (generated)
+  scenarios/1914.json     The Great War: nations, owners, income, wars,
+                          alliances, forts, technology, history          (generated)
+  scenarios/modern.json   Europe today, on the same provinces            (generated)
+  scenarios/index.json    the scenarios the game offers, in order        (generated)
   fonts/                  Old Standard, Barlow Condensed
 tool/
-  map/        Node pipeline that generates the two JSON files above
+  map/        Node pipeline that generates the JSON files above
   ci/         version numbering for releases
   icon/       draws the launcher icon
   sim.dart    headless balance runs
@@ -181,7 +216,7 @@ break a test.
    and drops what is not allowed. The UI may check first, but the engine
    never trusts it.
 4. **Saves must keep loading.** A new field in `GameState` needs a default in
-   `GameState.fromJson`.
+   `GameState.fromJson`, and a new field in `Orders` one in `Orders.fromJson`.
 
 Where to make common changes:
 
@@ -190,7 +225,8 @@ Where to make common changes:
 | A number: costs, combat bonus, truce length, AI caution | `lib/engine/rules.dart` |
 | How a turn resolves | `lib/engine/resolve.dart`, tests in `test/engine/resolve_test.dart` |
 | How the AI plays | `lib/engine/ai.dart`, then `dart run tool/sim.dart` over several seeds |
-| Who owns what in 1914, province names, colours, starting wars, sea links | `tool/map/config/scenario_1914.mjs`, then rebuild the map |
+| Who owns what in 1914, province names, colours, starting wars and alliances, forts, technology, history, sea links | `tool/map/config/scenario_1914.mjs`, then rebuild the map |
+| Europe today: nations, colours, alliances, development, names | `tool/map/config/scenario_modern.mjs`, then rebuild the map |
 | How the map is drawn | `lib/map/map_painters.dart`, `lib/map/map_scene.dart` |
 | A screen or sheet | `lib/ui/` |
 | Colours and type | `lib/theme.dart` |
@@ -228,10 +264,15 @@ node build_map.mjs            # add --fresh after changing the map window
 ```
 
 The script clips the data to the game window, assigns every unit its 1914
-owner, merges about two thousand units into 327 provinces without ever
-merging across a 1914 border, simplifies the outlines, works out adjacency,
-and writes `assets/map/europe.json` and `assets/scenarios/1914.json`. It also
-renders previews to `tool/map/out/`; look at them before committing.
+owner, merges about two thousand units into 327 provinces, never across a
+1914 border and, but for a few small territories, never across a modern one,
+simplifies the outlines, works out adjacency, and writes
+`assets/map/europe.json`, `assets/scenarios/1914.json` and
+`assets/scenarios/modern.json`. So today's borders fit the same provinces; the
+few provinces that mix two countries at this scale are assigned by hand in
+the modern config. It also renders
+previews and province lists to `tool/map/out/`; look at them before
+committing.
 
 Province ids are positions in the generated file. Changing how provinces are
 merged changes the map's build id, and saves made on the old map are then
@@ -350,7 +391,7 @@ match the style of the code around your change, and keep generated files
 (`assets/map`, `assets/scenarios`) in the same commit as the configuration
 change that produced them.
 
-For anything large, such as alliances, a new map or a new subsystem, open an
+For anything large, such as navies, a new map or a new subsystem, open an
 issue first so the design can be agreed before the work is done.
 
 ## Credits and licence

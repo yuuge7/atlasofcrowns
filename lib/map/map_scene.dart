@@ -31,6 +31,7 @@ class MapScene extends ChangeNotifier {
   final World world;
 
   List<int> _owners = const [];
+  List<Color>? _fills;
 
   /// Land fills, recorded once per ownership change.
   ui.Picture? land;
@@ -42,9 +43,19 @@ class MapScene extends ChangeNotifier {
 
   Color colorOf(int nation) => Color(world.nations[nation].color);
 
-  void setOwners(List<int> owners) {
-    if (listEquals(owners, _owners)) return;
+  /// The colour province [p] is filled with.
+  Color fillOf(int p) => _fills?[p] ?? colorOf(_owners[p]);
+
+  /// Nation names are lettered only over the nations' own colours.
+  bool get lettered => _fills == null;
+
+  /// Colours the land by owner, or by [fills] (one colour per province)
+  /// for the other map modes. Borders always follow the owners.
+  void setOwners(List<int> owners, {List<Color>? fills}) {
+    final ownersChanged = !listEquals(owners, _owners);
+    if (!ownersChanged && listEquals(fills, _fills)) return;
     _owners = List.of(owners);
+    _fills = fills == null ? null : List.of(fills);
 
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
@@ -59,14 +70,17 @@ class MapScene extends ChangeNotifier {
       canvas.drawPath(p.path, ink);
     }
     for (final p in geometry.provinces) {
-      canvas.drawPath(p.path, fill..color = colorOf(_owners[p.id]));
+      canvas.drawPath(p.path, fill..color = fillOf(p.id));
     }
     land?.dispose();
     land = recorder.endRecording();
 
-    innerBorders = geometry.bordersWhere((arc) => _owners[arc.a] == _owners[arc.b]);
-    nationBorders = geometry.bordersWhere((arc) => _owners[arc.a] != _owners[arc.b]);
-    lettering = _letter();
+    // A new map mode only recolours the land.
+    if (ownersChanged) {
+      innerBorders = geometry.bordersWhere((arc) => _owners[arc.a] == _owners[arc.b]);
+      nationBorders = geometry.bordersWhere((arc) => _owners[arc.a] != _owners[arc.b]);
+      lettering = _letter();
+    }
     notifyListeners();
   }
 

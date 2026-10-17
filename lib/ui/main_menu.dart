@@ -4,6 +4,7 @@ import '../data/game_assets.dart';
 import '../data/save_store.dart';
 import '../engine/game.dart';
 import '../engine/rules.dart';
+import '../engine/world.dart';
 import '../game/game_controller.dart';
 import '../map/map_camera.dart';
 import '../map/map_painters.dart';
@@ -56,7 +57,7 @@ class _MainMenuState extends State<MainMenu> {
 
   Future<void> _continue() async {
     try {
-      final loaded = await widget.saves.load(SaveStore.autosaveId, widget.assets.world);
+      final loaded = await widget.saves.load(SaveStore.autosaveId, widget.assets);
       if (mounted) _open(loaded);
     } on FormatException catch (e) {
       setState(() {
@@ -67,14 +68,14 @@ class _MainMenuState extends State<MainMenu> {
   }
 
   void _open(LoadedSave loaded) {
-    _play(context, GameController(assets: widget.assets, saves: widget.saves, game: loaded.game, orders: loaded.orders));
+    _play(context, GameController(assets: widget.assets, saves: widget.saves, game: loaded.game, orders: loaded.orders, marches: loaded.marches));
   }
 
   @override
   Widget build(BuildContext context) {
     final map = widget.assets.geometry.size;
     final autosave = _autosave;
-    final nations = widget.assets.world.nations;
+    final seat = autosave == null ? null : widget.assets.nationOf(autosave.scenario, autosave.nation);
     return Scaffold(
       body: Stack(children: [
         Positioned.fill(
@@ -104,7 +105,7 @@ class _MainMenuState extends State<MainMenu> {
               Align(alignment: Alignment.centerLeft, child: Container(margin: const EdgeInsets.only(top: 18, bottom: 12, left: 4), height: 1.5, width: 132, color: AtlasColors.brass)),
               Text('EUROPE, AUGUST 1914', style: AtlasText.label.copyWith(fontSize: 14, color: AtlasColors.ivory)),
               const Spacer(),
-              if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: AtlasText.body.copyWith(color: const Color(0xFFF08A75)))),
+              if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(_error!, style: AtlasText.body.copyWith(color: AtlasColors.signalText))),
               if (autosave != null) ...[
                 FilledButton(
                   onPressed: _continue,
@@ -112,7 +113,7 @@ class _MainMenuState extends State<MainMenu> {
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     const Text('CONTINUE'),
                     Text(
-                      '${autosave.nation >= 0 ? nations[autosave.nation].shortName : 'Watching'}, ${autosave.date}',
+                      '${seat?.shortName ?? 'Watching'}, ${autosave.date}',
                       style: const TextStyle(fontFamily: AtlasFonts.display, fontStyle: FontStyle.italic, fontSize: 14, letterSpacing: 0, fontWeight: FontWeight.w400),
                     ),
                   ]),
@@ -149,6 +150,67 @@ class _MainMenuState extends State<MainMenu> {
   }
 }
 
+/// A scenario to play, as a tab over the map: its year and its name.
+class _ScenarioTab extends StatelessWidget {
+  const _ScenarioTab(this.world, {required this.selected, required this.onTap});
+
+  final World world;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceTile(
+      selected: selected,
+      onTap: onTap,
+      label: '${world.startYear}, ${world.scenarioName}',
+      child: Row(crossAxisAlignment: CrossAxisAlignment.baseline, textBaseline: TextBaseline.alphabetic, children: [
+        Text('${world.startYear}', style: AtlasText.figure.copyWith(color: selected ? AtlasColors.brassBright : AtlasColors.ivoryDim)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(world.scenarioName, style: AtlasText.note.copyWith(color: selected ? AtlasColors.ivory : AtlasColors.ivoryDim), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ),
+      ]),
+    );
+  }
+}
+
+/// One setting of a new game: tapping it steps to the next choice.
+class _Setting extends StatelessWidget {
+  const _Setting({required this.label, required this.value, required this.note, required this.onTap});
+
+  final String label;
+  final String value;
+  final String note;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$label: $value. Tap to change.',
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(5),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(5), border: Border.all(color: AtlasColors.brass)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              Expanded(child: Text(label.toUpperCase(), style: AtlasText.label, maxLines: 1)),
+              const Icon(Icons.unfold_more, size: 16, color: AtlasColors.brass),
+            ]),
+            const SizedBox(height: 3),
+            Text(value, style: AtlasText.figure.copyWith(fontSize: 17), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(note, style: AtlasText.note.copyWith(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
 /// Pick a nation by tapping it on the map.
 class NationSelect extends StatefulWidget {
   const NationSelect({super.key, required this.assets, required this.saves});
@@ -162,21 +224,44 @@ class NationSelect extends StatefulWidget {
 
 class _NationSelectState extends State<NationSelect> {
   static const _lengths = [('Short', 0.3), ('Standard', Rules.defaultWinFraction), ('Long', 0.55)];
+  static const _difficulties = ['Easy', 'Normal', 'Hard'];
 
-  late final MapScene _scene = MapScene(widget.assets.geometry, widget.assets.world)..setOwners(widget.assets.world.startOwners);
+  late World _world = widget.assets.world;
+  late MapScene _scene = _sceneFor(_world);
   late final MapCamera _camera = MapCamera(widget.assets.geometry.size);
   final MapOverlay _overlay = MapOverlay();
 
   /// The opening position, to read each nation's strength from.
-  late final Game _opening = Game.start(widget.assets.world, human: -1, seed: 0);
+  late Game _opening = Game.start(_world, human: -1, seed: 0);
   int _nation = 0;
   double _winFraction = Rules.defaultWinFraction;
+  int _difficulty = Rules.normalDifficulty;
+  bool _fog = false;
+
+  MapScene _sceneFor(World world) => MapScene(widget.assets.geometry, world)..setOwners(world.startOwners);
 
   @override
   void initState() {
     super.initState();
-    _overlay.capitals = {for (final n in widget.assets.world.nations) n.capital};
+    _overlay.capitals = {for (final n in _world.nations) n.capital};
     _pick(_nation, center: false);
+  }
+
+  /// Switches to another scenario, keeping the player's nation when it
+  /// exists there too.
+  void _chooseScenario(World world) {
+    if (world == _world) return;
+    final current = _world.nations[_nation];
+    final old = _scene;
+    setState(() {
+      _world = world;
+      _scene = _sceneFor(world);
+      _opening = Game.start(world, human: -1, seed: 0);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => old.dispose());
+    _overlay.capitals = {for (final n in world.nations) n.capital};
+    final same = world.nations.where((n) => n.tag == current.tag || n.shortName == current.shortName).firstOrNull;
+    _pick(same?.id ?? 0);
   }
 
   @override
@@ -188,7 +273,7 @@ class _NationSelectState extends State<NationSelect> {
   }
 
   void _pick(int nation, {bool center = true}) {
-    final capital = widget.assets.world.nations[nation].capital;
+    final capital = _world.nations[nation].capital;
     setState(() => _nation = nation);
     _overlay
       ..selected = capital
@@ -197,20 +282,30 @@ class _NationSelectState extends State<NationSelect> {
   }
 
   void _begin() {
-    final game = Game.start(widget.assets.world, human: _nation, seed: DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF, winFraction: _winFraction);
+    final game = Game.start(
+      _world,
+      human: _nation,
+      seed: DateTime.now().millisecondsSinceEpoch & 0x7FFFFFFF,
+      winFraction: _winFraction,
+      difficulty: _difficulty,
+      fog: _fog,
+    );
     final controller = GameController(assets: widget.assets, saves: widget.saves, game: game)..autosave();
     _play(context, controller);
   }
 
   @override
   Widget build(BuildContext context) {
-    final world = widget.assets.world;
+    final world = _world;
     final nation = world.nations[_nation];
     final enemies = [
       for (final other in world.nations)
         if (_opening.atWar(_nation, other.id)) other.shortName,
     ];
     final provinces = world.provinces.length;
+    final allyNames = [for (final a in _opening.alliesOf(_nation)) world.nations[a].shortName];
+    final allies = allyNames.length > 4 ? '${allyNames.take(3).join(', ')} and ${allyNames.length - 3} more' : allyNames.join(', ');
+    final length = _lengths.indexWhere((l) => l.$2 == _winFraction);
     return Scaffold(
       backgroundColor: AtlasColors.sea,
       body: Column(children: [
@@ -221,6 +316,17 @@ class _NationSelectState extends State<NationSelect> {
             const Expanded(child: Text('Choose your crown', style: AtlasText.title)),
           ]),
         ),
+        if (widget.assets.scenarios.length > 1)
+          Container(
+            color: AtlasColors.baizeDeep,
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+            child: Row(children: [
+              for (final scenario in widget.assets.scenarios) ...[
+                if (scenario != widget.assets.scenarios.first) const SizedBox(width: 8),
+                Expanded(child: _ScenarioTab(scenario, selected: scenario == _world, onTap: () => _chooseScenario(scenario))),
+              ],
+            ]),
+          ),
         Expanded(
           child: MapView(
             scene: _scene,
@@ -245,10 +351,11 @@ class _NationSelectState extends State<NationSelect> {
                   Text(nation.name, style: AtlasText.place, maxLines: 1, overflow: TextOverflow.ellipsis),
                   Text(
                     enemies.isEmpty ? 'At peace with everyone' : 'At war with ${enemies.join(', ')}',
-                    style: AtlasText.note.copyWith(color: enemies.isEmpty ? AtlasColors.ivoryDim : const Color(0xFFF08A75)),
+                    style: AtlasText.note.copyWith(color: enemies.isEmpty ? AtlasColors.ivoryDim : AtlasColors.signalText),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  if (allies.isNotEmpty) Text('Allied with $allies', style: AtlasText.note, maxLines: 2, overflow: TextOverflow.ellipsis),
                 ]),
               ),
             ]),
@@ -261,26 +368,33 @@ class _NationSelectState extends State<NationSelect> {
                 Expanded(child: Stat('Gold', '${_opening.state.gold[_nation]}')),
               ]),
             ),
-            Text('PROVINCES NEEDED TO WIN', style: AtlasText.label),
-            const SizedBox(height: 6),
             Row(children: [
-              for (final (label, fraction) in _lengths)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: OutlinedButton(
-                      onPressed: () => setState(() => _winFraction = fraction),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: _winFraction == fraction ? AtlasColors.baizeLight : null,
-                        foregroundColor: _winFraction == fraction ? AtlasColors.ivory : AtlasColors.ivoryDim,
-                        side: BorderSide(color: _winFraction == fraction ? AtlasColors.brassBright : AtlasColors.baizeLight, width: _winFraction == fraction ? 1.5 : 1),
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        minimumSize: const Size(48, 52),
-                      ),
-                      child: Text('${label.toUpperCase()}\n${(fraction * provinces).ceil()}', textAlign: TextAlign.center),
-                    ),
-                  ),
+              Expanded(
+                child: _Setting(
+                  label: 'To win',
+                  value: '${(_winFraction * provinces).ceil()} provinces',
+                  note: _lengths[length].$1,
+                  onTap: () => setState(() => _winFraction = _lengths[(length + 1) % _lengths.length].$2),
                 ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _Setting(
+                  label: 'Difficulty',
+                  value: _difficulties[_difficulty],
+                  note: 'AI income ${(Rules.aiIncome[_difficulty] * 100).round()}%',
+                  onTap: () => setState(() => _difficulty = (_difficulty + 1) % _difficulties.length),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _Setting(
+                  label: 'Fog of war',
+                  value: _fog ? 'On' : 'Off',
+                  note: _fog ? 'Armies near you' : 'All armies seen',
+                  onTap: () => setState(() => _fog = !_fog),
+                ),
+              ),
             ]),
             const SizedBox(height: 14),
             FilledButton(onPressed: _begin, style: FilledButton.styleFrom(minimumSize: const Size(64, 56)), child: Text('PLAY AS ${nation.shortName.toUpperCase()}')),

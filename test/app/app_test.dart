@@ -6,10 +6,8 @@ import 'package:atlasofcrowns/data/save_store.dart';
 import 'package:atlasofcrowns/engine/game.dart';
 import 'package:atlasofcrowns/engine/orders.dart';
 import 'package:atlasofcrowns/engine/rules.dart';
-import 'package:atlasofcrowns/engine/world.dart';
 import 'package:atlasofcrowns/game/game_controller.dart';
 import 'package:atlasofcrowns/map/map_camera.dart';
-import 'package:atlasofcrowns/map/map_geometry.dart';
 import 'package:atlasofcrowns/map/map_scene.dart';
 import 'package:atlasofcrowns/map/map_view.dart';
 import 'package:atlasofcrowns/theme.dart';
@@ -17,11 +15,7 @@ import 'package:atlasofcrowns/ui/main_menu.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-GameAssets loadAssets() {
-  final map = jsonDecode(File('assets/map/europe.json').readAsStringSync()) as Map<String, dynamic>;
-  final scenario = jsonDecode(File('assets/scenarios/1914.json').readAsStringSync()) as Map<String, dynamic>;
-  return GameAssets(World.fromJson(map, scenario), MapGeometry.fromJson(map));
-}
+GameAssets loadAssets() => GameAssets.read((path) => jsonDecode(File(path).readAsStringSync()));
 
 void main() {
   final assets = loadAssets();
@@ -184,6 +178,155 @@ void main() {
       expect(c.lastReport, same(report));
     });
 
+    test('a fort is ordered once per province and paid from the free gold', () {
+      final c = newController('GER');
+      final berlin = province('Berlin');
+      final gold = c.goldFree;
+      c.tapProvince(berlin);
+      c.beginBuild();
+      expect(c.mode, InputMode.build);
+      final cost = c.game.buildCost(berlin, Project.fortify);
+      c.orderBuild(Project.fortify);
+      expect(c.mode, InputMode.browse);
+      expect(c.goldFree, gold - cost);
+      expect(c.canBuild(berlin, Project.develop), isFalse);
+      c.beginBuild();
+      expect(c.mode, InputMode.browse);
+      c.cancelBuild(c.buildAt(berlin)!);
+      expect(c.goldFree, gold);
+      c.tapProvince(province('Paris'));
+      c.beginBuild();
+      expect(c.mode, InputMode.browse);
+    });
+
+    test('alliances are offered and left from the controller', () {
+      final c = newController('GER');
+      final austria = nation('AUS');
+      final denmark = nation('DEN');
+      expect(c.game.allied(c.human, austria), isTrue);
+      c.setAllianceOffered(austria, true);
+      expect(c.orders.offerAlliance, isEmpty);
+      c.setAllianceOffered(denmark, true);
+      expect(c.orders.offerAlliance, {denmark});
+      c.setAllianceBroken(denmark, true);
+      expect(c.orders.breakAlliance, isEmpty);
+      c.setAllianceBroken(austria, true);
+      expect(c.orders.breakAlliance, {austria});
+    });
+
+    test('a research plan is a change to the standing one, or nothing', () {
+      final c = newController('GER');
+      final field = c.researchField;
+      final share = c.researchShare;
+      final other = Field.values.firstWhere((f) => f != field);
+      final gold = c.goldFree;
+      c.setResearch(other, 30);
+      expect(c.orders.research?.field, other);
+      expect(c.researchSpend, c.income * 30 ~/ 100);
+      expect(c.goldFree, gold, reason: 'research is paid at the end of the turn, from what is left');
+      c.setResearch(field, share);
+      expect(c.orders.research, isNull);
+      c.setResearch(field, 7);
+      expect(c.orders.research, isNull);
+      c.setResearch(Field.industry, 20);
+      c.endTurn();
+      expect(c.game.state.researchShare[c.human], 20);
+      expect(c.researchField, Field.industry);
+    });
+
+    test('fog of war hides the armies far from the player', () {
+      final game = Game.start(world, human: nation('GER'), seed: 1, fog: true);
+      final c = GameController(assets: assets, saves: saves, game: game);
+      final paris = province('Paris');
+      final posen = province('Posen');
+      final prague = province('Prague');
+      expect(c.canSee(paris), isFalse);
+      expect(c.overlay.units![paris], -1);
+      expect(c.canSee(posen), isTrue);
+      expect(c.canSee(prague), isTrue, reason: 'Austria-Hungary is an ally');
+      expect(c.overlay.units![prague], c.state.units[prague]);
+      expect(newController('GER').canSee(paris), isTrue);
+      expect(c.unitsSeen(paris), isNull);
+      expect(c.armyOf(nation('FRA')), isNull);
+      expect(c.armyOf(nation('AUS')), c.game.unitsOf(nation('AUS')));
+      expect(c.armyOf(nation('GER')), c.game.unitsOf(nation('GER')));
+    });
+
+    test('map modes recolour the land and keep the borders', () {
+      final c = newController('GER');
+      final berlin = province('Berlin');
+      final paris = province('Paris');
+      final prague = province('Prague');
+      expect(c.scene.lettered, isTrue);
+      c.setMapMode(MapMode.diplomacy);
+      expect(c.scene.lettered, isFalse);
+      expect(c.scene.fillOf(berlin), AtlasColors.mapYou);
+      expect(c.scene.fillOf(paris), AtlasColors.mapEnemy);
+      expect(c.scene.fillOf(prague), AtlasColors.mapAlly);
+      c.setMapMode(MapMode.economy);
+      expect(c.scene.fillOf(berlin), incomeColor(c.game.provinceIncome(berlin)));
+      c.setMapMode(MapMode.political);
+      expect(c.scene.fillOf(berlin), Color(world.nations[nation('GER')].color));
+    });
+
+    test('a march walks one province a turn to a far province of yours', () {
+      final c = newController('GER');
+      final berlin = province('Berlin');
+      final munich = province('Munich');
+      final path = c.game.pathThroughOwnLand(c.human, berlin, munich)!;
+      expect(path.first, berlin);
+      expect(path.last, munich);
+      expect(path.length, greaterThan(2));
+      final before = c.state.units[munich];
+
+      c.tapProvince(berlin);
+      c.beginMove();
+      expect(c.overlay.targets, isNot(contains(munich)));
+      c.tapProvince(munich);
+      expect(c.mode, InputMode.moveAmount);
+      expect(c.canMarch(berlin, munich), isTrue);
+      c.confirmMove(5);
+      expect(c.marches, hasLength(1));
+      expect(c.orders.moves.single.to, path[1]);
+      expect(c.overlay.marches.single.last, munich);
+
+      for (var turn = 1; turn < path.length; turn++) {
+        c.endTurn();
+        if (turn < path.length - 1) {
+          expect(c.marches.single.at, path[turn]);
+          expect(c.orders.moves.single.from, path[turn]);
+        }
+      }
+      expect(c.marches, isEmpty);
+      expect(c.orders.moves, isEmpty);
+      expect(c.state.units[munich], greaterThanOrEqualTo(before + 5));
+    });
+
+    test('cancelling its step calls the march off', () {
+      final c = newController('GER');
+      c.tapProvince(province('Berlin'));
+      c.beginMove();
+      c.tapProvince(province('Munich'));
+      c.confirmMove(3);
+      c.cancelMove(c.orders.moves.single);
+      expect(c.marches, isEmpty);
+      c.endTurn();
+      expect(c.orders.moves, isEmpty);
+    });
+
+    test('a march survives a save', () async {
+      final c = newController('GER');
+      c.tapProvince(province('Berlin'));
+      c.beginMove();
+      c.tapProvince(province('Munich'));
+      c.confirmMove(4);
+      await c.autosave();
+      final loaded = await saves.load(SaveStore.autosaveId, assets);
+      final back = GameController(assets: assets, saves: saves, game: loaded.game, orders: loaded.orders, marches: loaded.marches);
+      expect(back.marches.single.to, province('Munich'));
+      expect(back.marchOf(back.orders.moves.single), same(back.marches.single));
+    });
+
     test('war is declared from the province sheet and can be called off', () {
       final c = newController('GER');
       final denmark = nation('DEN');
@@ -213,7 +356,7 @@ void main() {
       expect(list.first.date, 'Dec 1914');
       expect(list.first.nation, nation('FRA'));
 
-      final loaded = await saves.load(id, world);
+      final loaded = await saves.load(id, assets);
       expect(jsonEncode(loaded.game.toJson()), jsonEncode(game.toJson()));
       expect(loaded.orders.recruits.single.count, 2);
 
@@ -221,11 +364,23 @@ void main() {
       expect((await saves.list()).single.isAutosave, isTrue);
     });
 
+    test('a save opens in the scenario it was made in', () async {
+      final modern = assets.scenario('modern');
+      final game = Game.start(modern, human: 1, seed: 5);
+      game.endTurn(null);
+      final id = await saves.saveNew(game, Orders());
+      final info = (await saves.list()).single;
+      expect(info.scenario, 'modern');
+      final loaded = await saves.load(id, assets);
+      expect(loaded.game.world, same(modern));
+      expect(() => assets.scenario('1066'), throwsFormatException);
+    });
+
     test('a damaged or missing save says so', () async {
       File('${temp.path}/broken.json').writeAsStringSync('{"game": 3');
       expect((await saves.list()), isEmpty);
-      expect(() => saves.load('broken', world), throwsFormatException);
-      expect(() => saves.load('nothing', world), throwsFormatException);
+      expect(() => saves.load('broken', assets), throwsFormatException);
+      expect(() => saves.load('nothing', assets), throwsFormatException);
     });
 
     test('ending a turn autosaves', () async {
@@ -284,10 +439,20 @@ void main() {
     expect(find.text('Choose your crown'), findsOneWidget);
     expect(find.text('PLAY AS GERMANY'), findsOneWidget);
 
+    // Germany is in both scenarios and stays picked across the switch.
+    await tester.tap(find.text('Europe today'));
+    await tester.pumpAndSettle();
+    expect(find.text('Federal Republic of Germany'), findsOneWidget);
+    expect(find.text('PLAY AS GERMANY'), findsOneWidget);
+    await tester.tap(find.text('The Great War'));
+    await tester.pumpAndSettle();
+    expect(find.text('German Empire'), findsOneWidget);
+
     await tester.tap(find.text('PLAY AS GERMANY'));
     await tester.pumpAndSettle();
     expect(find.text('END TURN'), findsOneWidget);
-    expect(find.text('German Empire'), findsOneWidget);
+    // The full name, or the short one where the full one does not fit.
+    expect(find.byWidgetPredicate((w) => w is Text && (w.data == 'German Empire' || w.data == 'Germany')), findsOneWidget);
     expect(find.text('Aug 1914, turn 1'), findsOneWidget);
 
     await tester.tap(find.text('END TURN'));
