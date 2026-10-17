@@ -168,10 +168,13 @@ Future<T?> showAtlasSheet<T>(BuildContext context, WidgetBuilder builder, {doubl
 /// What a bottom sheet holds: its title and a note under it, a close
 /// button, a brass rule, then [body], which takes the room that is left.
 class AtlasSheet extends StatelessWidget {
-  const AtlasSheet({super.key, required this.title, this.note, this.banner, required this.body});
+  const AtlasSheet({super.key, required this.title, this.note, this.banner, this.action, required this.body});
 
   final String title;
   final String? note;
+
+  /// A button beside the close button.
+  final Widget? action;
 
   /// Shown between the rule and the body, e.g. an error.
   final Widget? banner;
@@ -190,6 +193,7 @@ class AtlasSheet extends StatelessWidget {
                 if (note != null) Text(note!, style: AtlasText.note),
               ]),
             ),
+            ?action,
             IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close), tooltip: 'Close'),
           ]),
         ),

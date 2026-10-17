@@ -9,20 +9,41 @@ import 'map_scene.dart';
 /// An order drawn on the map in staff pencil: blue for a march through your
 /// own land, red for an attack.
 class MapArrow {
-  const MapArrow(this.from, this.to, this.count, {required this.hostile});
+  const MapArrow(this.from, this.to, this.count, {required this.hostile, this.naval = false});
 
   final int from;
   final int to;
   final int count;
   final bool hostile;
+
+  /// Across the sea: drawn dashed.
+  final bool naval;
+}
+
+/// Units on the march while a turn is replayed.
+class MapMovement {
+  const MapMovement(this.from, this.to, this.count, this.color, {required this.hostile, this.naval = false});
+
+  final int from;
+  final int to;
+  final int count;
+
+  /// Colour of the nation marching.
+  final Color color;
+  final bool hostile;
+
+  /// Shipped across the sea.
+  final bool naval;
 }
 
 /// The changing things drawn over the land: selection, orders, armies.
 class MapOverlay extends ChangeNotifier {
   int selected = -1;
 
-  /// Provinces offered as destinations while picking where to move.
+  /// Provinces offered as destinations while picking where to move: those
+  /// reached overland, and those across the sea.
   Set<int> targets = const {};
+  Set<int> landings = const {};
   List<MapArrow> arrows = const [];
 
   /// The road still ahead of each march, after this turn's step: provinces
@@ -43,6 +64,14 @@ class MapOverlay extends ChangeNotifier {
   /// Provinces that just changed hands, and how far their flash has faded (1 to 0).
   Set<int> flashing = const {};
   double flash = 0;
+
+  /// The last turn being replayed: the armies on the move, how far along
+  /// they are (0 to 1), and the provinces fought over, with how strongly
+  /// their battle marks show (0 to 1).
+  List<MapMovement> movements = const [];
+  double march = 0;
+  Set<int> battles = const {};
+  double battle = 0;
 
   void changed() => notifyListeners();
 }
@@ -76,6 +105,21 @@ class MapBasePainter extends CustomPainter {
       final steps = math.max(2, ((to - from).distance / gap).round());
       for (var i = 0; i <= steps; i++) {
         canvas.drawCircle(Offset.lerp(from, to, i / steps)!, 1.1 / scale, dot);
+      }
+    }
+    // The seas, lettered while the names are a readable size; the land is
+    // drawn over whatever spills onto it.
+    final seaSize = MapScene.seaFont * scale;
+    final seaAlpha = math.min(((seaSize - 7) / 3).clamp(0.0, 1.0), ((34 - seaSize) / 10).clamp(0.0, 1.0)) * 0.55;
+    if (seaAlpha > 0) {
+      final visibleSea = camera.visibleMap;
+      for (final (center, painter) in scene.seaLettering) {
+        final topLeft = center - Offset(painter.width / 2, painter.height / 2);
+        final box = topLeft & painter.size;
+        if (!box.overlaps(visibleSea)) continue;
+        canvas.saveLayer(box, Paint()..color = Color.fromRGBO(0, 0, 0, seaAlpha));
+        painter.paint(canvas, topLeft);
+        canvas.restore();
       }
     }
     final land = scene.land;
@@ -156,14 +200,19 @@ class MapOverlayPainter extends CustomPainter {
         canvas.drawPath(geometry.provinces[p].path, paint);
       }
     }
-    if (overlay.targets.isNotEmpty) {
+    if (overlay.targets.isNotEmpty || overlay.landings.isNotEmpty) {
       final wash = Paint()..color = AtlasColors.ivory.withValues(alpha: 0.3);
+      final seaWash = Paint()..color = AtlasColors.staffBlue.withValues(alpha: 0.35);
       final edge = Paint()
         ..style = PaintingStyle.stroke
         ..color = AtlasColors.ivory
         ..strokeWidth = 2 / scale;
       for (final p in overlay.targets) {
         canvas.drawPath(geometry.provinces[p].path, wash);
+        canvas.drawPath(geometry.provinces[p].path, edge);
+      }
+      for (final p in overlay.landings) {
+        canvas.drawPath(geometry.provinces[p].path, seaWash);
         canvas.drawPath(geometry.provinces[p].path, edge);
       }
     }
@@ -198,7 +247,7 @@ class MapOverlayPainter extends CustomPainter {
     final owners = scene.owners;
     for (final p in geometry.provinces) {
       final onScreen = p.radius * scale;
-      final picked = p.id == overlay.selected || overlay.targets.contains(p.id);
+      final picked = p.id == overlay.selected || overlay.targets.contains(p.id) || overlay.landings.contains(p.id);
       if (onScreen < 9 && !picked) continue;
       if (!visible.inflate(p.radius).contains(p.label)) continue;
       final at = camera.toScreen(p.label);
@@ -213,6 +262,87 @@ class MapOverlayPainter extends CustomPainter {
         final name = _layout(scene.world.provinces[p.id].name, _nameStyle.copyWith(color: ink.withValues(alpha: 0.85)), ink == AtlasColors.ink ? 'n0' : 'n1');
         if (name.width < onScreen * 3.2 || picked) name.paint(canvas, Offset(at.dx - name.width / 2, nameTop));
       }
+    }
+
+    // ---- the last turn, replayed
+    if (overlay.battle > 0) {
+      for (final p in overlay.battles) {
+        final label = geometry.provinces[p].label;
+        if (!visible.inflate(40 / scale).contains(label)) continue;
+        _drawBattle(canvas, camera.toScreen(label) - const Offset(0, 22), overlay.battle);
+      }
+    }
+    final screen = (Offset.zero & size).inflate(20);
+    for (final move in overlay.movements) {
+      final from = camera.toScreen(geometry.provinces[move.from].label);
+      final to = camera.toScreen(geometry.provinces[move.to].label);
+      final at = Offset.lerp(from, to, overlay.march)!;
+      if (!screen.contains(at)) continue;
+      // The trail behind it, in the marching nation's colour over ink;
+      // dashed across the sea.
+      final trail = Path()
+        ..moveTo(from.dx, from.dy)
+        ..lineTo(at.dx, at.dy);
+      _strokeShaft(canvas, trail, _trailUnder, dashed: move.naval);
+      _strokeShaft(canvas, trail, _trail..color = move.color, dashed: move.naval);
+      _drawCounter(canvas, at, move.count, move.color, 0, false, 0);
+      if (move.hostile) {
+        canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromCenter(center: at, width: 26, height: 21), const Radius.circular(4)), _attackRing);
+      }
+    }
+  }
+
+  /// Strokes [path] with [paint], whole or in dashes.
+  static void _strokeShaft(Canvas canvas, Path path, Paint paint, {required bool dashed}) {
+    if (!dashed) {
+      canvas.drawPath(path, paint);
+      return;
+    }
+    for (final metric in path.computeMetrics()) {
+      for (var d = 0.0; d < metric.length; d += 12) {
+        canvas.drawPath(metric.extractPath(d, math.min(d + 7, metric.length)), paint);
+      }
+    }
+  }
+
+  static final Paint _trailUnder = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 4.5
+    ..strokeCap = StrokeCap.round
+    ..color = AtlasColors.ink;
+  static final Paint _trail = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2.5
+    ..strokeCap = StrokeCap.round;
+  static final Paint _attackRing = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 2
+    ..color = AtlasColors.signal;
+
+  /// Crossed swords on a red disc, where a battle was fought; [strength]
+  /// fades it in.
+  void _drawBattle(Canvas canvas, Offset at, double strength) {
+    final disc = Paint()..color = AtlasColors.signal.withValues(alpha: strength);
+    final rim = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = AtlasColors.ivory.withValues(alpha: strength);
+    final blade = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round
+      ..color = AtlasColors.ivory.withValues(alpha: strength);
+    final radius = 9 + 2 * strength;
+    canvas.drawCircle(at, radius, disc);
+    canvas.drawCircle(at, radius, rim);
+    for (final side in [-1.0, 1.0]) {
+      // Each sword runs from a lower corner to the opposite upper one, with
+      // a short crossguard near its hilt.
+      final hilt = at + Offset(side * 5, 5);
+      final tip = at + Offset(-side * 5, -5);
+      canvas.drawLine(hilt, tip, blade);
+      final guard = Offset.lerp(hilt, tip, 0.25)!;
+      canvas.drawLine(guard + Offset(-2, 2 * side), guard + Offset(2, -2 * side), blade);
     }
   }
 
@@ -363,16 +493,20 @@ class MapOverlayPainter extends CustomPainter {
     final stroke = Paint()
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
-    canvas.drawPath(
+    _strokeShaft(
+        canvas,
         shaft,
         stroke
           ..color = AtlasColors.ivory
-          ..strokeWidth = 6.5);
-    canvas.drawPath(
+          ..strokeWidth = 6.5,
+        dashed: arrow.naval);
+    _strokeShaft(
+        canvas,
         shaft,
         stroke
           ..color = color
-          ..strokeWidth = 4);
+          ..strokeWidth = 4,
+        dashed: arrow.naval);
     final heading = (end - bend) / (end - bend).distance;
     final side = Offset(-heading.dy, heading.dx);
     final head = Path()

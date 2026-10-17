@@ -22,6 +22,8 @@ World tinyWorld({
   List<List<int>> wars = const [],
   List<List<int>> alliances = const [],
   List<HistoryEvent> history = const [],
+  List<List<int>>? coast,
+  List<SeaZone> seas = const [],
 }) {
   final nationCount = owners.reduce((a, b) => a > b ? a : b) + 1;
   return World(
@@ -31,17 +33,16 @@ World tinyWorld({
     startYear: 1914,
     startMonth: 8,
     provinces: [
-      for (var p = 0; p < links.length; p++)
-        Province(id: p, name: 'P$p', modern: 'TST', area: 1000, adj: links[p], sea: const [], income: income?[p] ?? 2),
+      for (var p = 0; p < links.length; p++) Province(id: p, name: 'P$p', modern: 'TST', area: 1000, adj: links[p], sea: const [], income: income?[p] ?? 2, coast: coast?[p] ?? const []),
     ],
     nations: [
-      for (var n = 0; n < nationCount; n++)
-        Nation(id: n, tag: 'N$n', name: 'Nation $n', shortName: 'N$n', color: 0xFF000000, capital: owners.indexOf(n)),
+      for (var n = 0; n < nationCount; n++) Nation(id: n, tag: 'N$n', name: 'Nation $n', shortName: 'N$n', color: 0xFF000000, capital: owners.indexOf(n)),
     ],
     startOwners: owners,
     startWars: wars,
     startAlliances: alliances,
     history: history,
+    seas: seas,
   );
 }
 

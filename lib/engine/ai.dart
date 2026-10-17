@@ -40,13 +40,27 @@ class Outlook {
 }
 
 class _Target {
-  _Target(this.province, this.need, this.score, this.sources);
+  _Target(this.province, this.need, this.score, this.sources, this.bySea);
 
   final int province;
+
+  /// Strength to send, in units marching overland.
   final int need;
   final double score;
+
+  /// My provinces that can reach it, overland first.
   final List<int> sources;
+
+  /// Those of [sources] that would have to land from the sea.
+  final Set<int> bySea;
+
+  /// What a unit from [p] counts for in the attack.
+  double weight(int p) => bySea.contains(p) ? Rules.landingFactor : 1;
 }
+
+/// Share of the armies across the sea that a coastal province guards
+/// against: they could land, but weaker and not everywhere at once.
+const double _seaThreat = 0.4;
 
 /// Plans one turn for nation [me].
 ///
@@ -70,13 +84,14 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
 
   bool hostile(int p) => s.wars.contains(pairKey(me, s.owner[p]));
 
-  // My provinces by what they touch.
+  // My provinces by what they touch, overland and across the sea.
   final threat = <int, int>{};
   final front = <int>[];
   final border = <int>{};
   final neighbors = <int>{};
+  final reach = <int>{};
   for (final p in mine) {
-    var danger = 0;
+    var danger = 0.0;
     var touchesEnemy = false;
     for (final q in w.provinces[p].links) {
       final other = s.owner[q];
@@ -88,25 +103,65 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
         danger += s.units[q];
       }
     }
-    threat[p] = danger;
+    for (final q in w.landings[p]) {
+      final other = s.owner[q];
+      if (other == me) continue;
+      reach.add(other);
+      if (hostile(q)) {
+        touchesEnemy = true;
+        danger += s.units[q] * _seaThreat;
+      }
+    }
+    threat[p] = danger.round();
     if (touchesEnemy) front.add(p);
   }
+  reach.addAll(neighbors);
 
   final enemies = [
     for (var n = 0; n < nationCount; n++)
       if (n != me && s.alive[n] && g.atWar(me, n)) n,
   ];
 
+  // ------------------------------------------------------------ vassalage
+  // A vassal fights its overlord's wars and makes no peace of its own; it
+  // throws the overlord off once strong enough.
+  final lord = s.overlord[me];
+  if (lord >= 0 && power[me] > Rules.aiIndependence * power[lord] && rng.chance(0.15)) orders.declareIndependence = true;
+
   // ------------------------------------------------------------ peace
-  for (final e in enemies) {
+  final myProvinces = mine.length;
+  for (final e in lord >= 0 ? const <int>[] : enemies) {
     final key = pairKey(me, e);
     final fought = s.turn - (s.warStart[key] ?? s.turn);
     final quiet = s.turn - (s.lastGain[key] ?? s.turn);
+    final score = g.warScore(me, e);
+    final theirs = g.hasPeaceOffer(e, me) ? g.peaceTermsOf(e, me) : null;
+
+    // Asked for terms: give in only when beaten.
+    if (theirs == Terms.reparations || theirs == Terms.vassal) {
+      final beaten = theirs == Terms.reparations ? (score <= -2 && power[me] < power[e]) || power[me] * 2 < power[e] : power[me] * 3 < power[e] && myProvinces <= 4;
+      if (beaten) {
+        orders.offerPeace.add(e);
+        orders.peaceTerms[e] = Terms.accept;
+      }
+      continue;
+    }
+
+    // Winning: ask for terms once the war has run a while.
+    var demand = Terms.white;
+    if (score >= 3 && power[me] > 1.5 * power[e]) demand = Terms.reparations;
+    if (power[e] * 3 < power[me] && g.provinceCount(e) <= 3 && g.canDemand(me, e, Terms.vassal)) demand = Terms.vassal;
+    if (demand != Terms.white && fought >= Rules.aiMinWarTurns && (quiet >= 4 || theirs != null)) {
+      orders.offerPeace.add(e);
+      orders.peaceTerms[e] = demand;
+      continue;
+    }
+
     var wantPeace = false;
     if (fought >= Rules.aiMinWarTurns) {
-      wantPeace = !neighbors.contains(e) || quiet >= Rules.aiStalemateTurns || power[e] > 2 * power[me];
+      wantPeace = !reach.contains(e) || quiet >= Rules.aiStalemateTurns || power[e] > 2 * power[me];
     }
-    if (!wantPeace && g.hasPeaceOffer(e, me)) {
+    if (!wantPeace && theirs != null) {
       wantPeace = fought >= 3 && power[me] < 1.3 * power[e];
     }
     if (wantPeace) orders.offerPeace.add(e);
@@ -121,13 +176,18 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
     for (var t = 0; t < nationCount; t++)
       if (t != me && s.alive[t] && worries(t, me)) t,
   ];
-  // A partner is worth having when something worries us both. Never one at
-  // war with an ally, and never a weak neighbor that may be worth a war.
-  bool worthAllying(int c) {
+  // A weak neighbor may be worth a war one day: no pact or alliance with it.
+  bool prey(int c) => neighborhood[me].contains(c) && power[me] > Rules.aiWarRatio * (power[c] + 1);
+  // A partner is worth having when something worries us both, or, when it
+  // [asked], when it is a friend. Never one at war with an ally, never one
+  // disliked, and never prey.
+  bool worthAllying(int c, {bool asked = false}) {
     for (final a in allies) {
       if (g.atWar(a, c)) return false;
     }
-    if (neighborhood[me].contains(c) && power[me] > Rules.aiWarRatio * (power[c] + 1)) return false;
+    final liking = s.relation(me, c);
+    if (prey(c) || liking < Rules.aiAllyRelation) return false;
+    if (asked && liking >= Rules.aiFriendRelation) return true;
     for (final t in worriers) {
       if (t != c && worries(t, c)) return true;
     }
@@ -138,7 +198,7 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   var allyCount = allies.length;
   for (var c = 0; c < nationCount; c++) {
     if (allyCount >= Rules.aiMaxAlliances) break;
-    if (g.hasAllianceOffer(c, me) && worthAllying(c) && g.canOfferAlliance(me, c)) {
+    if (g.hasAllianceOffer(c, me) && worthAllying(c, asked: true) && g.canOfferAlliance(me, c)) {
       orders.offerAlliance.add(c);
       allyCount++;
     }
@@ -156,6 +216,24 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final restless = s.turn - s.lastWar[me];
   for (final a in allies) {
     if (enemies.isEmpty && restless >= 12 && !worthAllying(a) && rng.chance(0.1)) orders.breakAlliance.add(a);
+  }
+
+  // ------------------------------------------------------------ pacts
+  // A pact with a stronger neighbor buys time. One is signed with anyone
+  // liked well enough who asks, while a war elsewhere needs the flank kept
+  // quiet or the asker is the stronger; never with prey, and never just to
+  // tie my own hands.
+  for (var c = 0; c < nationCount; c++) {
+    if (!g.hasPactOffer(c, me) || prey(c) || s.relation(me, c) < Rules.aiPactRelation || !g.canOfferPact(me, c)) continue;
+    if (enemies.isNotEmpty || power[c] > power[me]) orders.offerPact.add(c);
+  }
+  if (lord < 0 && rng.chance(0.1)) {
+    var partner = -1;
+    for (final c in neighborhood[me].toList()..sort()) {
+      if (power[c] <= power[me] || orders.offerPact.contains(c) || g.askedPactRecently(me, c) || s.relation(me, c) < Rules.aiPactRelation || !g.canOfferPact(me, c)) continue;
+      if (partner < 0 || power[c] > power[partner]) partner = c;
+    }
+    if (partner >= 0) orders.offerPact.add(partner);
   }
 
   // ------------------------------------------------------------ war
@@ -186,7 +264,9 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
       for (final ally in g.wouldDefend(me, n, view.allies[n])) {
         defence += power[ally] * (neighborhood[me].contains(ally) ? 1 : 0.3);
       }
-      final odds = power[me] / (defence + 1) * (1 + 0.2 * math.min(distracted, 2)) * (withAllies ? 1.3 : 1) / (1 + 0.5 * fronts) * rng.range(0.9, 1.1);
+      // Friends are spared, and old enemies sought out.
+      final grudge = 1 - s.relation(me, n) / (4 * Rules.maxRelation);
+      final odds = power[me] / (defence + 1) * (1 + 0.2 * math.min(distracted, 2)) * (withAllies ? 1.3 : 1) / (1 + 0.5 * fronts) * grudge * rng.range(0.9, 1.1);
       if (odds > bestOdds) {
         bestOdds = odds;
         victim = n;
@@ -200,19 +280,23 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final free = {for (final p in mine) p: s.units[p]};
   final targets = <int>{};
   for (final p in front) {
-    for (final q in w.provinces[p].links) {
+    for (final q in [...w.provinces[p].links, ...w.landings[p]]) {
       if (s.owner[q] != me && hostile(q)) targets.add(q);
     }
   }
   final plans = <_Target>[];
   for (final t in targets.toList()..sort()) {
-    final sources = [
+    final overland = [
       for (final q in w.provinces[t].links)
         if (s.owner[q] == me) q,
     ];
+    final bySea = {
+      for (final q in w.landings[t])
+        if (s.owner[q] == me) q,
+    };
     final need = (g.defenseStrength(t) * Rules.aiAttackMargin / g.armyFactor(me)).ceil() + 1;
-    final value = g.fullIncome(t) * 2.0 + (g.isCapital(t) ? 12 : 0) + sources.length * 1.5 + rng.nextDouble();
-    plans.add(_Target(t, need, value / (need + 3), sources));
+    final value = g.fullIncome(t) * 2.0 + (g.isCapital(t) ? 12 : 0) + overland.length * 1.5 + bySea.length * 0.5 + rng.nextDouble();
+    plans.add(_Target(t, need, value / (need + 3), [...overland, ...bySea.toList()..sort()], bySea));
   }
   plans.sort((a, b) => b.score.compareTo(a.score));
   for (final plan in plans) {
@@ -222,19 +306,25 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
       return math.max(0, free[p]! - (others * 0.5).ceil());
     }
 
-    var pool = 0;
+    var pool = 0.0;
     for (final p in plan.sources) {
-      pool += spare(p);
+      pool += spare(p) * plan.weight(p);
     }
     if (pool < plan.need) continue;
-    var toSend = math.min(pool, (plan.need * 1.5).ceil());
-    final bySpare = List.of(plan.sources)..sort((a, b) => spare(b) != spare(a) ? spare(b) - spare(a) : a - b);
-    for (final p in bySpare) {
-      final take = math.min(spare(p), toSend);
+    // Overland first, then the largest spare.
+    var toSend = math.min(pool, plan.need * 1.5);
+    final order = List.of(plan.sources)
+      ..sort((a, b) {
+        if (plan.weight(a) != plan.weight(b)) return plan.weight(b).compareTo(plan.weight(a));
+        return spare(b) != spare(a) ? spare(b) - spare(a) : a - b;
+      });
+    for (final p in order) {
+      if (toSend <= 0) break;
+      final take = math.min(spare(p), (toSend / plan.weight(p)).ceil());
       if (take <= 0) continue;
       orders.moves.add(MoveOrder(p, plan.province, take));
       free[p] = free[p]! - take;
-      toSend -= take;
+      toSend -= take * plan.weight(p);
     }
   }
 
@@ -297,6 +387,22 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final share = enemies.isEmpty ? Rules.aiResearchPeace : Rules.aiResearchWar;
   if (field.index != s.researchFocus[me] || share != s.researchShare[me]) orders.research = ResearchPlan(field, share);
 
+  // ------------------------------------------------------------ envoys
+  // At peace with gold to spare, court the strongest power that worries
+  // me, or an ally, while they are not yet friends.
+  var purse = s.gold[me];
+  if (enemies.isEmpty && purse > income * 4 && rng.chance(0.15)) {
+    var courted = -1;
+    for (final c in [...worriers, ...allies]..sort()) {
+      if (s.relation(me, c) >= Rules.aiFriendRelation || !g.canCourt(me, c)) continue;
+      if (courted < 0 || power[c] > power[courted]) courted = c;
+    }
+    if (courted >= 0) {
+      orders.envoys.add(courted);
+      purse -= g.envoyCost(courted);
+    }
+  }
+
   // ------------------------------------------------------------ recruiting
   // Fill up towards the army what the income can pay for once research and
   // forts are paid; in peacetime hold back and let the treasury grow.
@@ -309,8 +415,7 @@ Orders planAi(Game g, int me, Rng rng, [Outlook? outlook]) {
   final mobilised = enemies.isNotEmpty || s.gold[me] > income * Rules.aiFullTreasuryTurns;
   final payable = income - g.researchSpend(me, share: share, income: income) - forts * Rules.fortUpkeep;
   final ceiling = (payable * Rules.unitsPerUpkeepGold * (mobilised ? Rules.aiWarArmy : Rules.aiPeaceArmy)).floor();
-  var budget = math.min(s.gold[me] ~/ Rules.unitCost, ceiling - troops);
-  var purse = s.gold[me];
+  var budget = math.min(purse ~/ Rules.unitCost, ceiling - troops);
   if (budget > 0) {
     int gap(int p) => threat[p]! - s.units[p];
     final byNeed = List.of(mine)

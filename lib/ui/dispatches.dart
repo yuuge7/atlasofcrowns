@@ -1,17 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../engine/events.dart';
+import '../engine/happenings.dart';
 import '../engine/orders.dart';
+import '../engine/rules.dart';
 import '../engine/world.dart';
 import '../game/game_controller.dart';
 import '../theme.dart';
+import 'diplomacy_sheet.dart';
+import 'happening_dialog.dart';
 import 'research_sheet.dart';
 import 'widgets.dart';
 
 enum Tone { good, bad, plain }
 
-/// An offer the player can answer from the dispatches.
-enum Offer { peace, alliance }
+/// An offer the player can answer from the dispatches, or a happening
+/// waiting for their answer.
+enum Offer { peace, alliance, pact, happening }
 
 class Dispatch {
   const Dispatch(this.text, [this.tone = Tone.plain, this.offer]);
@@ -43,16 +48,42 @@ class Dispatches {
             elsewhere.add(Dispatch('${nation(e.a)} declared war on ${nation(e.b)}.'));
           }
         case EventKind.peaceSigned:
+          final terms = Terms.values[e.n1];
+          final winner = e.n2;
+          final loser = winner == e.a ? e.b : e.a;
+          final outcome = switch (terms) {
+            Terms.reparations => winner == human
+                ? ': ${nation(loser)} pays you reparations for ${Rules.reparationTurns} turns'
+                : (loser == human ? ': you pay ${nation(winner)} reparations for ${Rules.reparationTurns} turns' : ', ${nation(loser)} paying reparations'),
+            Terms.vassal => winner == human
+                ? ': ${nation(loser)} is now your vassal'
+                : (loser == human ? ': you are now the vassal of ${nation(winner)}' : ', ${nation(loser)} becoming a vassal of ${nation(winner)}'),
+            Terms.white || Terms.accept => '',
+          };
           if (mine) {
-            yours.add(Dispatch('Peace with ${nation(e.a == human ? e.b : e.a)}.', Tone.good));
+            yours.add(Dispatch('Peace with ${nation(e.a == human ? e.b : e.a)}$outcome.', loser == human && winner >= 0 ? Tone.bad : Tone.good));
           } else {
-            elsewhere.add(Dispatch('${nation(e.a)} and ${nation(e.b)} made peace.'));
+            elsewhere.add(Dispatch('${nation(e.a)} and ${nation(e.b)} made peace$outcome.'));
           }
         case EventKind.peaceOffered:
+          final terms = Terms.values[e.n1];
           if (e.b == human) {
-            yours.add(Dispatch('${nation(e.a)} offers peace.', Tone.plain, (Offer.peace, e.a)));
+            final ask = switch (terms) {
+              Terms.reparations => ' if you pay reparations: ${(Rules.reparationShare * 100).round()}% of your income for ${Rules.reparationTurns} turns',
+              Terms.vassal => ' if you become its vassal: ${(Rules.vassalTribute * 100).round()}% of your income as tribute, and its wars your wars',
+              Terms.white || Terms.accept => '',
+            };
+            yours.add(Dispatch('${nation(e.a)} offers peace$ask.', terms == Terms.white || terms == Terms.accept ? Tone.plain : Tone.bad, (Offer.peace, e.a)));
           } else if (e.a == human) {
             yours.add(Dispatch('Your peace offer reached ${nation(e.b)}. No answer yet.'));
+          }
+        case EventKind.independence:
+          if (e.a == human) {
+            yours.add(Dispatch('You threw off ${nation(e.b)}. Its armies will come.', Tone.bad));
+          } else if (e.b == human) {
+            yours.add(Dispatch('Your vassal ${nation(e.a)} declared its independence and is at war with you.', Tone.bad));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} threw off ${nation(e.b)}.'));
           }
         case EventKind.calledToArms:
           if (e.a == human) {
@@ -84,6 +115,32 @@ class Dispatches {
           } else {
             elsewhere.add(Dispatch('${nation(e.a)} left its alliance with ${nation(e.b)}.'));
           }
+        case EventKind.pactSigned:
+          if (mine) {
+            yours.add(Dispatch('Non-aggression pact signed with ${nation(e.a == human ? e.b : e.a)} for ${Rules.pactTurns} turns.', Tone.good));
+          } else {
+            elsewhere.add(Dispatch('${nation(e.a)} and ${nation(e.b)} signed a non-aggression pact.'));
+          }
+        case EventKind.pactOffered:
+          if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} proposes a non-aggression pact for ${Rules.pactTurns} turns.', Tone.plain, (Offer.pact, e.a)));
+          } else if (e.a == human) {
+            yours.add(Dispatch('Your pact offer reached ${nation(e.b)}. No answer yet.'));
+          }
+        case EventKind.gift:
+          if (e.a == human) {
+            yours.add(Dispatch('You gave ${nation(e.b)} ${e.n1} gold. Relations ${signed(e.n2)}.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('${nation(e.a)} sent you ${e.n1} gold. Relations ${signed(e.n2)}.', Tone.good));
+          }
+        case EventKind.envoy:
+          if (e.a == human) {
+            yours.add(Dispatch('Your envoy was received in ${nation(e.b)}. Relations ${signed(e.n2)}.'));
+          } else if (e.b == human) {
+            yours.add(Dispatch('An envoy from ${nation(e.a)} was received at court. Relations ${signed(e.n2)}.', Tone.good));
+          }
+        case EventKind.happening:
+          if (e.a == human) yours.add(_happening(e, world, nation, place));
         case EventKind.battle:
           if (e.a == human) {
             yours.add(e.flag
@@ -133,10 +190,45 @@ class Dispatches {
     for (final entry in taken.entries) {
       final (winner, loser) = entry.key;
       final provinces = entry.value;
-      elsewhere.add(Dispatch(provinces.length == 1
-          ? '${nation(winner)} took ${place(provinces.first)} from ${nation(loser)}.'
-          : '${nation(winner)} took ${provinces.length} provinces from ${nation(loser)}.'));
+      elsewhere.add(
+          Dispatch(provinces.length == 1 ? '${nation(winner)} took ${place(provinces.first)} from ${nation(loser)}.' : '${nation(winner)} took ${provinces.length} provinces from ${nation(loser)}.'));
     }
+  }
+
+  /// How a happening to the player reads.
+  static Dispatch _happening(GameEvent e, World world, String Function(int) nation, String Function(int) place) {
+    final h = Happening.values[e.n1];
+    final at = place(e.province);
+    final amount = e.n3;
+    if (e.n2 < 0) {
+      final ask = switch (h) {
+        Happening.strike => 'Workers strike in $at.',
+        Happening.refugees => 'Refugees from the war reach $at.',
+        Happening.inventor => 'An inventor asks for an audience.',
+        _ => '',
+      };
+      return Dispatch(ask, Tone.plain, (Offer.happening, e.province));
+    }
+    final modern = world.startYear >= 1950;
+    return switch ((h, e.n2)) {
+      (Happening.harvest, _) => Dispatch('A bumper harvest in $at: $amount gold.', Tone.good),
+      (Happening.windfall, _) => Dispatch('Customs and taxes came in above the estimate: $amount gold.', Tone.good),
+      (Happening.epidemic, _) => amount > 0 ? Dispatch('Sickness in $at: $amount units died.', Tone.bad) : Dispatch('Sickness in $at. No soldiers were there to fall ill.'),
+      (Happening.volunteers, _) => Dispatch('Volunteers flock to the colours in $at: $amount units.', Tone.good),
+      (Happening.breakthrough, _) => Dispatch('A breakthrough in the laboratories: $amount gold of research done at once.', Tone.good),
+      (Happening.scandal, _) => Dispatch('A scandal at court cost the treasury $amount gold.', Tone.bad),
+      (Happening.fire, _) => Dispatch(amount > 0 ? 'Fire in $at. Rebuilding cost $amount gold.' : 'Fire in $at: a level of development lost.', Tone.bad),
+      (Happening.railway, _) => Dispatch('${modern ? 'A new motorway' : 'A new railway'} reaches $at: a level of development.', Tone.good),
+      (Happening.mutiny, _) => Dispatch('Unpaid troops mutinied in $at: $amount units deserted.', Tone.bad),
+      (Happening.incident, _) => Dispatch('A border incident with ${nation(e.b)} near $at. Relations ${signed(incidentRelation)}.', Tone.bad),
+      (Happening.visit, _) => Dispatch('A state visit from ${nation(e.b)}. Relations ${signed(visitRelation)}.', Tone.good),
+      (Happening.strike, 0) => Dispatch('The strikers in $at were paid $amount gold and went back to work.'),
+      (Happening.strike, _) => Dispatch(amount > 0 ? 'Troops broke the strike in $at: $amount units fell.' : 'Troops broke the strike in $at: a level of development lost.', Tone.bad),
+      (Happening.refugees, 0) => Dispatch('Refugees found shelter in $at for $amount gold: a level of development.', Tone.good),
+      (Happening.refugees, _) => Dispatch('Refugees were turned away from $at.'),
+      (Happening.inventor, 0) => Dispatch('The inventor got to work: $amount gold of research done at once.', Tone.good),
+      (Happening.inventor, _) => Dispatch('The inventor took the design elsewhere.'),
+    };
   }
 
   final List<Dispatch> yours = [];
@@ -198,10 +290,17 @@ class _Line extends StatelessWidget {
       Tone.plain => AtlasColors.baizeLight,
     };
     Widget? reply;
-    if (dispatch.offer case (final kind, final from)) {
+    if (dispatch.offer case (Offer.happening, final province)) {
+      if (controller.pendingHappening?.$2 == province) {
+        reply = controller.orders.answer == null
+            ? FilledButton(onPressed: () => showHappening(context, controller), child: const Text('ANSWER'))
+            : OutlinedButton(onPressed: () => showHappening(context, controller), child: const Text('CHANGE'));
+      }
+    } else if (dispatch.offer case (final kind, final from)) {
       final (open, answered, answer) = switch (kind) {
         Offer.peace => (controller.peaceOffers, controller.orders.offerPeace, controller.setPeaceOffered),
         Offer.alliance => (controller.allianceOffers, controller.orders.offerAlliance, controller.setAllianceOffered),
+        Offer.pact || Offer.happening => (controller.pactOffers, controller.orders.offerPact, controller.setPactOffered),
       };
       if (open.contains(from)) {
         reply = answered.contains(from)

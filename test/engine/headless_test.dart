@@ -157,7 +157,7 @@ void main() {
         expect(g.state.turn - lastCapture, lessThan(60), reason: 'nothing changed hands since turn $lastCapture');
       }
       expect(captures, greaterThan(100));
-      if (g.state.ended) expect(g.provinceCount(g.state.winner), greaterThanOrEqualTo(g.winTarget));
+      if (g.state.ended) expect(g.realmCount(g.state.winner), greaterThanOrEqualTo(g.winTarget));
     });
   }
 
@@ -167,7 +167,7 @@ void main() {
       g.endTurn(null);
     }
     expect(g.state.ended, isTrue);
-    expect(g.provinceCount(g.state.winner), greaterThanOrEqualTo(g.winTarget));
+    expect(g.realmCount(g.state.winner), greaterThanOrEqualTo(g.winTarget));
   });
 
   test('the AI can play the human seat', () {

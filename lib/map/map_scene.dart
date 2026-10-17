@@ -39,6 +39,30 @@ class MapScene extends ChangeNotifier {
   Path nationBorders = Path();
   List<NationLettering> lettering = const [];
 
+  /// Size of the sea names, in map units.
+  static const double seaFont = 17;
+
+  /// The sea names, laid out once: where each goes and its text.
+  late final List<(Offset, TextPainter)> seaLettering = [
+    for (final (name, at) in geometry.seaNames)
+      (
+        at,
+        TextPainter(
+          text: TextSpan(
+            text: name.toUpperCase(),
+            style: const TextStyle(
+              fontFamily: AtlasFonts.display,
+              fontStyle: FontStyle.italic,
+              fontSize: seaFont,
+              letterSpacing: seaFont * 0.3,
+              color: AtlasColors.coast,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout(),
+      ),
+  ];
+
   List<int> get owners => _owners;
 
   Color colorOf(int nation) => Color(world.nations[nation].color);

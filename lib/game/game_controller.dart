@@ -7,6 +7,7 @@ import '../data/game_assets.dart';
 import '../data/save_store.dart';
 import '../engine/events.dart';
 import '../engine/game.dart';
+import '../engine/happenings.dart';
 import '../engine/orders.dart';
 import '../engine/rules.dart';
 import '../engine/state.dart';
@@ -42,6 +43,9 @@ enum MapMode {
   /// By how each nation stands with the player.
   diplomacy,
 
+  /// By how each nation feels about the player.
+  relations,
+
   /// By what each province yields.
   economy,
 }
@@ -50,9 +54,11 @@ enum MapMode {
 /// the player first, then an ally, an enemy, a truce, plain peace.
 enum Relation {
   you(AtlasColors.mapYou, 'You'),
+  bound(AtlasColors.mapBound, 'Vassal ties'),
   ally(AtlasColors.mapAlly, 'Allies'),
   war(AtlasColors.mapEnemy, 'At war'),
   truce(AtlasColors.mapTruce, 'Truce'),
+  pact(AtlasColors.mapPact, 'Pact'),
   peace(AtlasColors.mapNeutral, 'Peace');
 
   const Relation(this.color, this.legend);
@@ -79,6 +85,21 @@ class March {
   List<int> ahead = const [];
 
   List<int> toJson() => [at, to, count, step?.to ?? -1];
+}
+
+/// The turn just resolved, as it plays out on the map before the new
+/// position shows: who held what and how many stood where before it, and
+/// the moves and battles the player could see.
+class Replay {
+  Replay(this.owners, this.units, this.movements, this.battles);
+
+  final List<int> owners;
+
+  /// Units that stayed put in each province while the others marched; a
+  /// negative count is one the player cannot see.
+  final List<int> units;
+  final List<MapMovement> movements;
+  final Set<int> battles;
 }
 
 /// The player's side of a running game: the orders being written this turn,
@@ -116,6 +137,9 @@ class GameController extends ChangeNotifier {
   int moveTarget = -1;
   TurnReport? lastReport;
 
+  /// The last turn while it is being replayed, else null.
+  Replay? replay;
+
   /// Set when the last autosave could not be written.
   String? saveError;
 
@@ -125,6 +149,7 @@ class GameController extends ChangeNotifier {
   int _income = 0;
   int _upkeep = 0;
   int _army = 0;
+  int _tribute = 0;
 
   World get world => game.world;
   GameState get state => game.state;
@@ -149,30 +174,42 @@ class GameController extends ChangeNotifier {
   /// How [nation] stands with the player.
   Relation relationTo(int nation) {
     if (nation == human) return Relation.you;
+    if (game.overlordOf(nation) == human || game.overlordOf(human) == nation) return Relation.bound;
     if (game.allied(human, nation)) return Relation.ally;
     if (game.atWar(human, nation)) return Relation.war;
     if (game.truceLeft(human, nation) > 0) return Relation.truce;
+    if (game.pactLeft(human, nation) > 0) return Relation.pact;
     return Relation.peace;
   }
 
+  /// How [nation] feels about the player.
+  int feeling(int nation) => state.relation(human, nation);
+
   /// Map modes that make sense for this game.
-  List<MapMode> get mapModes => [MapMode.political, if (commanding) MapMode.diplomacy, MapMode.economy];
+  List<MapMode> get mapModes => [
+        MapMode.political,
+        if (commanding) ...[MapMode.diplomacy, MapMode.relations],
+        MapMode.economy
+      ];
 
   void setMapMode(MapMode mode) {
     mapMode = mode;
-    _fills = _fillsFor(mode);
+    _fills = _fillsFor(mode, state.owner);
     _sync();
   }
 
-  List<Color>? _fillsFor(MapMode mode) {
+  List<Color>? _fillsFor(MapMode mode, List<int> owners) {
     switch (mode) {
       case MapMode.political:
         return null;
       case MapMode.diplomacy:
         final colors = [for (var n = 0; n < world.nations.length; n++) relationTo(n).color];
-        return [for (final o in state.owner) colors[o]];
+        return [for (final o in owners) colors[o]];
+      case MapMode.relations:
+        final colors = [for (var n = 0; n < world.nations.length; n++) n == human ? AtlasColors.mapYou : relationColor(feeling(n))];
+        return [for (final o in owners) colors[o]];
       case MapMode.economy:
-        return [for (var p = 0; p < state.owner.length; p++) incomeColor(game.provinceIncome(p))];
+        return [for (var p = 0; p < owners.length; p++) incomeColor(game.provinceIncome(p))];
     }
   }
 
@@ -180,12 +217,21 @@ class GameController extends ChangeNotifier {
 
   int get gold => commanding ? state.gold[human] : 0;
 
-  /// Gold not yet promised to recruits or building ordered this turn.
+  /// Gold not yet promised this turn: to recruits, building, envoys, gifts
+  /// or the answer to a happening.
   int get goldFree =>
-      gold - orders.recruits.fold<int>(0, (sum, r) => sum + r.count * Rules.unitCost) - orders.builds.fold<int>(0, (sum, b) => sum + game.buildCost(b.province, b.project));
+      gold -
+      orders.recruits.fold<int>(0, (sum, r) => sum + r.count * Rules.unitCost) -
+      orders.builds.fold<int>(0, (sum, b) => sum + game.buildCost(b.province, b.project)) -
+      orders.envoys.fold<int>(0, (sum, n) => sum + game.envoyCost(n)) -
+      orders.gifts.values.fold<int>(0, (sum, g) => sum + g) -
+      answerCost;
 
   int get income => _income;
   int get upkeep => _upkeep;
+
+  /// Reparations and tribute paid out each turn, less what comes in.
+  int get tribute => _tribute;
 
   /// Units in the player's whole army.
   int get army => _army;
@@ -219,9 +265,9 @@ class GameController extends ChangeNotifier {
     return math.max(0, math.min(game.recruitCap(p) - recruitsAt(p), goldFree ~/ Rules.unitCost));
   }
 
-  /// Where units in [p] may be sent.
+  /// Where units in [p] may be sent in one turn, overland or by sea.
   List<int> targetsFrom(int p) => [
-        for (final q in world.provinces[p].links)
+        for (final q in [...world.provinces[p].links, ...world.landings[p]])
           if (game.canMove(human, p, q)) q,
       ];
 
@@ -241,10 +287,49 @@ class GameController extends ChangeNotifier {
             if (game.hasAllianceOffer(n, human) && game.canOfferAlliance(human, n)) n,
       ];
 
+  /// Nations with a pact offer waiting for the player's answer.
+  List<int> get pactOffers => [
+        if (commanding)
+          for (var n = 0; n < world.nations.length; n++)
+            if (game.hasPactOffer(n, human) && game.canOfferPact(human, n)) n,
+      ];
+
+  // ------------------------------------------------------------ happenings
+
+  /// The happening waiting for the player's answer, and where: null when
+  /// there is none.
+  (Happening, int)? get pendingHappening {
+    final code = commanding ? state.pending[human] : null;
+    return code == null ? null : decodePending(code);
+  }
+
+  /// Gold the answer chosen so far costs.
+  int get answerCost {
+    final pending = pendingHappening;
+    final answer = orders.answer;
+    if (pending == null || answer == null) return 0;
+    return happeningCost(game, human, pending.$1, pending.$2, answer);
+  }
+
+  /// Gold [choice] of the pending happening costs.
+  int happeningCostOf(int choice) {
+    final pending = pendingHappening;
+    return pending == null ? 0 : happeningCost(game, human, pending.$1, pending.$2, choice);
+  }
+
+  /// Answers the pending happening with [choice], if the gold allows.
+  void answerHappening(int choice) {
+    final pending = pendingHappening;
+    if (pending == null || choice < 0 || choice >= pending.$1.choices) return;
+    orders.answer = null;
+    if (happeningCostOf(choice) <= goldFree) orders.answer = choice;
+    _sync();
+  }
+
   // ------------------------------------------------------------ input
 
   void tapProvince(int p) {
-    if (mode == InputMode.pickTarget && (overlay.targets.contains(p) || canMarch(selected, p))) {
+    if (mode == InputMode.pickTarget && (overlay.targets.contains(p) || overlay.landings.contains(p) || canMarch(selected, p))) {
       moveTarget = p;
       mode = InputMode.moveAmount;
     } else {
@@ -390,11 +475,47 @@ class GameController extends ChangeNotifier {
 
   void setWarDeclared(int nation, bool declared) => _setOrder(orders.declareWar, nation, declared, game.canDeclareWar(human, nation));
 
-  void setPeaceOffered(int nation, bool offered) => _setOrder(orders.offerPeace, nation, offered, game.atWar(human, nation));
+  /// Offers [nation] peace, or accepts its offer on the terms it asks; or
+  /// withdraws the offer.
+  void setPeaceOffered(int nation, bool offered) {
+    final theirs = game.hasPeaceOffer(nation, human) ? game.peaceTermsOf(nation, human) : Terms.white;
+    final demands = theirs == Terms.reparations || theirs == Terms.vassal;
+    offerPeace(nation, offered ? (demands ? Terms.accept : Terms.white) : null);
+  }
+
+  /// Offers [nation] peace on [terms], or withdraws the offer when null.
+  void offerPeace(int nation, Terms? terms) {
+    orders.peaceTerms.remove(nation);
+    if (terms != null && game.atWar(human, nation) && game.canDemand(human, nation, terms)) {
+      if (terms != Terms.white) orders.peaceTerms[nation] = terms;
+    }
+    _setOrder(orders.offerPeace, nation, terms != null, orders.peaceTerms.containsKey(nation) || terms == Terms.white);
+  }
+
+  /// Throws off the player's overlord at the end of the turn, or thinks
+  /// better of it.
+  void setIndependence(bool declared) {
+    orders.declareIndependence = declared && game.overlordOf(human) >= 0;
+    _sync();
+  }
 
   void setAllianceOffered(int nation, bool offered) => _setOrder(orders.offerAlliance, nation, offered, game.canOfferAlliance(human, nation));
 
   void setAllianceBroken(int nation, bool broken) => _setOrder(orders.breakAlliance, nation, broken, game.allied(human, nation));
+
+  void setPactOffered(int nation, bool offered) => _setOrder(orders.offerPact, nation, offered, game.canOfferPact(human, nation));
+
+  /// Sends an envoy to [nation] at the end of the turn, or calls it back.
+  void setEnvoy(int nation, bool sent) => _setOrder(orders.envoys, nation, sent, commanding && game.canCourt(human, nation) && game.envoyCost(nation) <= goldFree);
+
+  /// Gives [nation] [gold] at the end of the turn, in place of any gift
+  /// already ordered; 0 calls the gift off.
+  void setGift(int nation, int gold) {
+    final before = orders.gifts.remove(nation) ?? 0;
+    if (gold > 0 && commanding && game.canCourt(human, nation)) orders.gifts[nation] = gold.clamp(0, goldFree);
+    if (orders.gifts[nation] == 0) orders.gifts.remove(nation);
+    if (before != (orders.gifts[nation] ?? 0)) _sync();
+  }
 
   // ------------------------------------------------------------ research
 
@@ -416,10 +537,15 @@ class GameController extends ChangeNotifier {
 
   // ------------------------------------------------------------ turn
 
-  /// Resolves the turn with the orders written so far and autosaves.
+  /// Resolves the turn with the orders written so far and autosaves. The
+  /// turn is then ready to be replayed, see [replay].
   TurnReport endTurn() {
     final resolved = orders;
+    final ownersBefore = List.of(state.owner);
+    final unitsBefore = [for (var p = 0; p < state.units.length; p++) canSee(p) ? state.units[p] : -1];
+    final sightBefore = _sight;
     final report = game.endTurn(commanding ? orders : null);
+    replay = _replayOf(report, ownersBefore, unitsBefore, sightBefore);
     orders = Orders();
     _newTurn();
     if (commanding) {
@@ -456,30 +582,99 @@ class GameController extends ChangeNotifier {
     }
   }
 
+  /// What of [report] the player could see, ready to replay over the
+  /// position before it; null when nothing worth showing happened there.
+  Replay? _replayOf(TurnReport report, List<int> owners, List<int> units, List<bool>? sight) {
+    bool seen(int p) => sight?[p] ?? true;
+    final movements = <MapMovement>[];
+    for (final m in report.movements) {
+      if (!seen(m.from) && !seen(m.to)) continue;
+      movements.add(MapMovement(m.from, m.to, m.count, Color(world.nations[m.nation].color), hostile: m.hostile, naval: m.bySea));
+      if (units[m.from] > 0) units[m.from] -= m.count;
+    }
+    final battles = {
+      for (final e in report.events)
+        if (e.kind == EventKind.battle && seen(e.province)) e.province,
+    };
+    if (movements.isEmpty && battles.isEmpty) return null;
+    return Replay(owners, units, movements, battles);
+  }
+
+  /// Moves the replay along: [march] is how far the armies have come, 0 to
+  /// 1, and [battle] how strongly the battles show.
+  void setReplay({required double march, required double battle}) {
+    if (replay == null) return;
+    overlay
+      ..march = march
+      ..battle = battle
+      ..changed();
+  }
+
+  /// Ends the replay and shows the turn as it now stands.
+  void endReplay() {
+    if (replay == null) return;
+    replay = null;
+    _sync();
+  }
+
   /// Works out what only a new turn can change.
   void _newTurn() {
     _sight = state.fog && commanding ? game.sightOf(human) : null;
     if (!mapModes.contains(mapMode)) mapMode = MapMode.political;
-    _fills = _fillsFor(mapMode);
+    _fills = _fillsFor(mapMode, state.owner);
     if (commanding) {
       _income = game.incomeOf(human);
       _upkeep = game.upkeepOf(human);
       _army = game.unitsOf(human);
+      _tribute = game.tributeOwed(human);
     }
   }
 
-  /// Pushes the current game and orders into the map layers.
+  /// Pushes the current game and orders into the map layers, or the turn
+  /// before while it is being replayed.
   void _sync() {
+    final replay = this.replay;
+    if (replay != null) {
+      scene.setOwners(replay.owners, fills: _fillsFor(mapMode, replay.owners));
+      overlay
+        ..selected = -1
+        ..targets = const {}
+        ..landings = const {}
+        ..arrows = const []
+        ..marches = const []
+        ..units = replay.units
+        ..recruits = const {}
+        ..movements = replay.movements
+        ..battles = replay.battles
+        ..march = 0
+        ..battle = 0
+        ..changed();
+      notifyListeners();
+      return;
+    }
     scene.setOwners(state.owner, fills: _fills);
+    final reachable = mode == InputMode.pickTarget ? targetsFrom(selected) : const <int>[];
+    final overland = selected >= 0 ? world.provinces[selected].links : const <int>[];
     overlay
+      ..movements = const []
+      ..battles = const {}
+      ..landings = mode == InputMode.pickTarget
+          ? {
+              for (final q in reachable)
+                if (!overland.contains(q)) q
+            }
+          : const {}
       ..selected = selected
       ..targets = switch (mode) {
-        InputMode.pickTarget => targetsFrom(selected).toSet(),
+        InputMode.pickTarget => {
+            for (final q in reachable)
+              if (overland.contains(q)) q
+          },
         InputMode.moveAmount => {moveTarget},
         _ => const {},
       }
       ..arrows = [
-        for (final m in orders.moves) MapArrow(m.from, m.to, m.count, hostile: state.owner[m.to] != human),
+        for (final m in orders.moves) MapArrow(m.from, m.to, m.count, hostile: state.owner[m.to] != human, naval: !world.provinces[m.from].links.contains(m.to)),
       ]
       ..marches = [
         for (final m in marches) m.ahead,

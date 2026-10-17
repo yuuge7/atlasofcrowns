@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'events.dart';
 import 'game.dart';
+import 'happenings.dart';
 import 'orders.dart';
 import 'rng.dart';
 import 'rules.dart';
@@ -14,20 +15,26 @@ class _Attack {
   final int nation;
   int count = 0;
 
+  /// What the units count for: less than [count] when some come by sea.
+  double strength = 0;
+
   /// Where the units came from, so they can fall back.
   final Map<int, int> origins = {};
 
-  void add(int from, int units) {
+  void add(int from, int units, {required bool bySea}) {
     count += units;
+    strength += bySea ? units * Rules.landingFactor : units;
     origins[from] = (origins[from] ?? 0) + units;
   }
 }
 
 /// Resolves one turn for every nation at once and advances [Game.state].
 ///
-/// Order of play: diplomacy, recruitment and building, movement, battles,
-/// unrest, eliminations, economy, victory. [orders] is indexed by nation; null means no orders.
-/// Orders the rules do not allow are skipped without failing the turn.
+/// Order of play: answers to last turn's happenings, diplomacy, recruitment
+/// and building, movement, battles, unrest, eliminations, economy, this
+/// turn's happenings, victory. [orders] is indexed by nation; null means no
+/// orders. Orders the rules do not allow are skipped without failing the
+/// turn.
 TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   final w = g.world;
   final s = g.state;
@@ -43,10 +50,43 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     }
   }
 
+  // ---------------------------------------------------------- 0. relations
+  // Allies grow closer and enemies further apart; the rest forget. This
+  // comes first so that what the turn brings is felt in full until the next.
+  for (final key in s.relations.keys.toList()) {
+    if (s.wars.contains(key) || s.alliances.contains(key) || turn % Rules.relationDriftTurns != 0) continue;
+    final (a, b) = pairOf(key);
+    s.changeRelation(a, b, -s.relation(a, b).sign);
+  }
+  for (final key in s.alliances) {
+    final (a, b) = pairOf(key);
+    if (s.relation(a, b) < Rules.alliedRelation) s.changeRelation(a, b, 1);
+  }
+  for (final key in s.wars) {
+    final (a, b) = pairOf(key);
+    s.changeRelation(a, b, -1);
+  }
+
+  // ---------------------------------------------------------- 0b. answers
+  // What the player chose for last turn's happening, paid before anything
+  // else.
+  for (final n in s.pending.keys.toList()..sort()) {
+    answerPending(g, n, orders[n], events);
+  }
+
   // ---------------------------------------------------------- 1. diplomacy
   // History first: alliances are signed on the spot and wars go ahead of
   // this turn's declarations, as long as they still make sense. The player
   // is never made to go to war, only offered the alliance.
+  // A vassal that throws off its overlord is at war with it at once.
+  for (final (n, o) in each()) {
+    final lord = s.overlord[n];
+    if (!o.declareIndependence || lord < 0) continue;
+    s.overlord[n] = -1;
+    s.openWar(n, lord, turn);
+    events.add(GameEvent(EventKind.independence, a: n, b: lord));
+  }
+
   final declarations = <(int, int)>[];
   for (var i = 0; i < w.history.length; i++) {
     final h = w.history[i];
@@ -96,32 +136,50 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     for (final ally in o.breakAlliance.toList()..sort()) {
       if (!g.allied(n, ally)) continue;
       s.alliances.remove(pairKey(n, ally));
+      s.changeRelation(n, ally, Rules.brokenRelation);
       events.add(GameEvent(EventKind.allianceBroken, a: n, b: ally));
     }
   }
-  final freshAllianceOffers = <int>{};
+  _matchOffers(
+    g,
+    [for (final (n, o) in each()) (n, o.offerAlliance)],
+    s.allianceOffers,
+    s.allianceAsked,
+    g.canOfferAlliance,
+    (key) => s.alliances.add(key),
+    EventKind.allianceSigned,
+    EventKind.allianceOffered,
+    events,
+  );
+  _matchOffers(
+    g,
+    [for (final (n, o) in each()) (n, o.offerPact)],
+    s.pactOffers,
+    s.pactAsked,
+    g.canOfferPact,
+    (key) => s.pacts[key] = turn + 1 + Rules.pactTurns,
+    EventKind.pactSigned,
+    EventKind.pactOffered,
+    events,
+  );
+
+  // Envoys and gifts, paid before the recruits.
   for (final (n, o) in each()) {
-    for (final target in o.offerAlliance) {
-      if (!g.canOfferAlliance(n, target)) continue;
-      final offer = directedKey(n, target);
-      if (!s.allianceOffers.containsKey(offer)) freshAllianceOffers.add(offer);
-      s.allianceOffers[offer] = turn + Rules.peaceOfferTurns;
-      s.allianceAsked[offer] = turn;
+    for (final target in o.envoys.toList()..sort()) {
+      final cost = g.envoyCost(target);
+      if (!g.canCourt(n, target) || s.gold[n] < cost) continue;
+      s.gold[n] -= cost;
+      s.changeRelation(n, target, Rules.envoyGain);
+      events.add(GameEvent(EventKind.envoy, a: n, b: target, n1: cost, n2: Rules.envoyGain));
     }
-  }
-  final signed = <int>{};
-  for (final offer in s.allianceOffers.keys.toList()..sort()) {
-    final (from, to) = pairOf(offer);
-    final key = pairKey(from, to);
-    if (signed.contains(key)) continue;
-    if (s.allianceOffers.containsKey(directedKey(to, from)) && g.canOfferAlliance(from, to)) {
-      signed.add(key);
-      s.alliances.add(key);
-      s.allianceOffers.remove(offer);
-      s.allianceOffers.remove(directedKey(to, from));
-      events.add(GameEvent(EventKind.allianceSigned, a: math.min(from, to), b: math.max(from, to)));
-    } else if (freshAllianceOffers.contains(offer)) {
-      events.add(GameEvent(EventKind.allianceOffered, a: from, b: to));
+    for (final target in o.gifts.keys.toList()..sort()) {
+      final gold = math.min(o.gifts[target]!, s.gold[n]);
+      if (!g.canCourt(n, target) || gold <= 0) continue;
+      final gain = g.giftGain(target, gold);
+      s.gold[n] -= gold;
+      s.gold[target] += gold;
+      s.changeRelation(n, target, gain);
+      events.add(GameEvent(EventKind.gift, a: n, b: target, n1: gold, n2: gain));
     }
   }
 
@@ -138,26 +196,68 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       if (target < 0 || target >= nationCount) continue;
       final key = pairKey(n, target);
       if (!warsBefore.contains(key) || !s.wars.contains(key)) continue;
+      final terms = o.peaceTerms[target] ?? Terms.white;
+      if (!g.canDemand(n, target, terms)) continue;
       final offer = directedKey(n, target);
-      if (!s.peaceOffers.containsKey(offer)) freshOffers.add(offer);
+      if (!s.peaceOffers.containsKey(offer) || g.peaceTermsOf(n, target) != terms) freshOffers.add(offer);
       s.peaceOffers[offer] = turn + Rules.peaceOfferTurns;
+      if (terms == Terms.white) {
+        s.peaceTerms.remove(offer);
+      } else {
+        s.peaceTerms[offer] = terms.index;
+      }
     }
   }
+  // Peace is signed when the two offers agree: both white, or one asks and
+  // the other accepts.
   for (final key in s.wars.toList()..sort()) {
     final (a, b) = pairOf(key);
     final ab = directedKey(a, b);
     final ba = directedKey(b, a);
-    if (s.peaceOffers.containsKey(ab) && s.peaceOffers.containsKey(ba)) {
-      s.wars.remove(key);
-      s.warStart.remove(key);
-      s.lastGain.remove(key);
-      s.peaceOffers.remove(ab);
-      s.peaceOffers.remove(ba);
-      s.truceUntil[key] = turn + 1 + Rules.truceTurns;
-      events.add(GameEvent(EventKind.peaceSigned, a: a, b: b));
-    } else {
-      if (freshOffers.contains(ab)) events.add(GameEvent(EventKind.peaceOffered, a: a, b: b));
-      if (freshOffers.contains(ba)) events.add(GameEvent(EventKind.peaceOffered, a: b, b: a));
+    final agreed = s.peaceOffers.containsKey(ab) && s.peaceOffers.containsKey(ba) ? _agreement(g.peaceTermsOf(a, b), g.peaceTermsOf(b, a)) : null;
+    if (agreed == null) {
+      if (freshOffers.contains(ab)) events.add(GameEvent(EventKind.peaceOffered, a: a, b: b, n1: g.peaceTermsOf(a, b).index));
+      if (freshOffers.contains(ba)) events.add(GameEvent(EventKind.peaceOffered, a: b, b: a, n1: g.peaceTermsOf(b, a).index));
+      continue;
+    }
+    // The side whose terms were met, if any.
+    final winner = agreed == Terms.white ? -1 : (g.peaceTermsOf(a, b) == agreed ? a : b);
+    final loser = winner == a ? b : a;
+    s.closeWar(a, b, turn, Rules.truceTurns);
+    if (winner >= 0) s.changeRelation(a, b, Rules.termsRelation);
+    switch (agreed) {
+      case Terms.reparations:
+        s.tribute[directedKey(loser, winner)] = turn + 1 + Rules.reparationTurns;
+      case Terms.vassal:
+        s.overlord[loser] = winner;
+        s.alliances.removeWhere((k) {
+          final (x, y) = pairOf(k);
+          return x == loser || y == loser;
+        });
+      case Terms.white || Terms.accept:
+        break;
+    }
+    events.add(GameEvent(EventKind.peaceSigned, a: a, b: b, n1: agreed.index, n2: winner));
+  }
+
+  // Vassals follow their overlords into every war, and fight none of their
+  // own.
+  for (var v = 0; v < nationCount; v++) {
+    final lord = s.overlord[v];
+    if (lord < 0 || !s.alive[v] || !s.alive[lord]) continue;
+    for (final key in s.wars.toList()..sort()) {
+      final (a, b) = pairOf(key);
+      final enemy = a == lord ? b : (b == lord ? a : -1);
+      if (enemy < 0 || enemy == v || g.atWar(v, enemy)) continue;
+      s.openWar(v, enemy, turn);
+      events.add(GameEvent(EventKind.calledToArms, a: v, b: enemy, n1: lord));
+    }
+    for (final key in s.wars.toList()..sort()) {
+      final (a, b) = pairOf(key);
+      final enemy = a == v ? b : (b == v ? a : -1);
+      if (enemy < 0 || g.atWar(lord, enemy)) continue;
+      s.closeWar(v, enemy, turn, Rules.truceTurns);
+      events.add(GameEvent(EventKind.peaceSigned, a: math.min(v, enemy), b: math.max(v, enemy), n2: -1));
     }
   }
 
@@ -201,10 +301,12 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   final moved = List.filled(provinceCount, 0);
   final arrivals = List.filled(provinceCount, 0);
   final attacks = <int, Map<int, _Attack>>{};
+  final movements = <Movement>[];
   for (final (n, o) in each()) {
     for (final m in o.moves) {
       if (m.from < 0 || m.from >= provinceCount || m.to < 0 || m.to >= provinceCount) continue;
-      if (s.owner[m.from] != n || !w.provinces[m.from].links.contains(m.to)) continue;
+      if (s.owner[m.from] != n || !w.reaches(m.from, m.to)) continue;
+      final bySea = !w.provinces[m.from].links.contains(m.to);
       final count = math.min(m.count, startUnits[m.from] - moved[m.from]);
       if (count <= 0) continue;
       final target = s.owner[m.to];
@@ -213,10 +315,11 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       } else {
         final key = pairKey(n, target);
         if (!warsBefore.contains(key) || !s.wars.contains(key)) continue;
-        attacks.putIfAbsent(m.to, () => {}).putIfAbsent(n, () => _Attack(n)).add(m.from, count);
+        attacks.putIfAbsent(m.to, () => {}).putIfAbsent(n, () => _Attack(n)).add(m.from, count, bySea: bySea);
       }
       moved[m.from] += count;
       s.units[m.from] -= count;
+      movements.add(Movement(n, m.from, m.to, count, hostile: target != n, bySea: bySea));
     }
   }
   // Reinforcements arrive before the enemy does.
@@ -252,12 +355,13 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       final cover = dugIn ? g.defenseMultiplier(p) : 1.0;
       final rollA = rng.range(1 - Rules.combatSpread, 1 + Rules.combatSpread) * g.armyFactor(a.nation);
       final rollD = rng.range(1 - Rules.combatSpread, 1 + Rules.combatSpread) * g.armyFactor(holder);
-      final attack = a.count * rollA;
+      final attack = a.strength * rollA;
       final defense = defenders * cover * rollD;
       final attackerWon = attack > defense;
       final int survivors;
       if (attackerWon) {
-        survivors = ((attack - defense) / rollA).round().clamp(1, a.count);
+        // What is left of the attack, in units: its unspent share.
+        survivors = (a.count * (attack - defense) / attack).round().clamp(1, a.count);
       } else {
         survivors = ((defense - attack) / (cover * rollD)).round().clamp(1, defenders);
       }
@@ -277,6 +381,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       // A siege leaves the walls a level lower.
       if (s.forts[p] > 0) s.forts[p]--;
       s.lastGain[pairKey(holder, original)] = turn;
+      s.gains.update(directedKey(holder, original), (n) => n + 1, ifAbsent: () => 1);
       events.add(GameEvent(EventKind.captured, a: holder, b: original, province: p));
     }
   }
@@ -302,6 +407,7 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
       s.openWar(rebel, holder, turn);
     } else {
       s.lastGain[pairKey(rebel, holder)] = turn;
+      s.gains.update(directedKey(rebel, holder), (n) => n + 1, ifAbsent: () => 1);
     }
     events.add(GameEvent(EventKind.revolt, a: rebel, b: holder, province: p, n1: rebels, flag: reborn));
   }
@@ -331,10 +437,12 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   }
 
   // ---------------------------------------------------------- 6. economy
+  // Reparations and tribute come out of the income before upkeep.
+  final incomes = [for (var n = 0; n < nationCount; n++) s.alive[n] ? g.incomeOf(n) : 0];
   for (var n = 0; n < nationCount; n++) {
     if (!s.alive[n]) continue;
-    final income = g.incomeOf(n);
-    s.gold[n] += income - g.upkeepOf(n);
+    final income = incomes[n];
+    s.gold[n] += income - g.tributeOwed(n, incomes) - g.upkeepOf(n);
     if (s.gold[n] >= 0) {
       _payResearch(g, n, income, events);
       continue;
@@ -364,16 +472,24 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
     events.add(GameEvent(EventKind.desertion, a: n, n1: leaving));
   }
 
+  // ---------------------------------------------------------- 6b. happenings
+  if (s.randomEvents) rollHappenings(g, rng, events);
+
   // ---------------------------------------------------------- 7. victory
   if (!s.ended && !s.sandbox) {
-    var leader = -1;
-    var standing = 0;
+    // A vassal's land counts for its overlord, and only a free nation wins.
+    final realm = List.of(held);
     for (var n = 0; n < nationCount; n++) {
-      if (!s.alive[n]) continue;
-      standing++;
-      if (leader < 0 || held[n] > held[leader]) leader = n;
+      if (s.alive[n] && s.overlord[n] >= 0) realm[s.overlord[n]] += held[n];
     }
-    if (held[leader] >= g.winTarget || standing == 1) {
+    var leader = -1;
+    var free = 0;
+    for (var n = 0; n < nationCount; n++) {
+      if (!s.alive[n] || s.overlord[n] >= 0) continue;
+      free++;
+      if (leader < 0 || realm[n] > realm[leader]) leader = n;
+    }
+    if (realm[leader] >= g.winTarget || free == 1) {
       s.ended = true;
       s.winner = leader;
       events.add(GameEvent(EventKind.gameOver, a: leader));
@@ -388,12 +504,70 @@ TurnReport resolveTurn(Game g, List<Orders?> orders, Rng rng) {
   s.peaceOffers.removeWhere((_, lapses) => lapses <= s.turn);
   s.allianceOffers.removeWhere((_, lapses) => lapses <= s.turn);
   s.allianceAsked.removeWhere((_, asked) => asked + Rules.aiAllianceRetryTurns <= s.turn);
+  s.pactOffers.removeWhere((_, lapses) => lapses <= s.turn);
+  s.pactAsked.removeWhere((_, asked) => asked + Rules.aiAllianceRetryTurns <= s.turn);
+  s.pacts.removeWhere((_, until) => until <= s.turn);
+  s.tribute.removeWhere((_, until) => until <= s.turn);
   for (final key in s.wars) {
     final (a, b) = pairOf(key);
     s.lastWar[a] = s.turn;
     s.lastWar[b] = s.turn;
   }
-  return TurnReport(turn, events);
+  g.recordChronicle();
+  return TurnReport(turn, events, movements);
+}
+
+/// Records this turn's offers of one kind, [wanted] by each nation, and
+/// signs every pair whose offers cross while [allowed]; [sign] takes the
+/// pair's [pairKey]. New offers that are not signed yet are reported.
+void _matchOffers(
+  Game g,
+  List<(int, Set<int>)> wanted,
+  Map<int, int> offers,
+  Map<int, int> asked,
+  bool Function(int, int) allowed,
+  void Function(int key) sign,
+  EventKind signedKind,
+  EventKind offeredKind,
+  List<GameEvent> events,
+) {
+  final turn = g.state.turn;
+  final fresh = <int>{};
+  for (final (n, targets) in wanted) {
+    for (final target in targets) {
+      if (!allowed(n, target)) continue;
+      final offer = directedKey(n, target);
+      if (!offers.containsKey(offer)) fresh.add(offer);
+      offers[offer] = turn + Rules.peaceOfferTurns;
+      asked[offer] = turn;
+    }
+  }
+  final signed = <int>{};
+  for (final offer in offers.keys.toList()..sort()) {
+    final (from, to) = pairOf(offer);
+    final key = pairKey(from, to);
+    if (signed.contains(key)) continue;
+    if (offers.containsKey(directedKey(to, from)) && allowed(from, to)) {
+      signed.add(key);
+      sign(key);
+      offers.remove(offer);
+      offers.remove(directedKey(to, from));
+      events.add(GameEvent(signedKind, a: math.min(from, to), b: math.max(from, to)));
+    } else if (fresh.contains(offer)) {
+      events.add(GameEvent(offeredKind, a: from, b: to));
+    }
+  }
+}
+
+/// The terms two peace offers agree on, or null when they do not: both
+/// white, or one side asks and the other accepts. Accepting a white offer is
+/// white peace.
+Terms? _agreement(Terms ab, Terms ba) {
+  bool demands(Terms t) => t == Terms.reparations || t == Terms.vassal;
+  if (demands(ab) && demands(ba)) return null;
+  if (demands(ab)) return ba == Terms.accept ? ab : null;
+  if (demands(ba)) return ab == Terms.accept ? ba : null;
+  return Terms.white;
 }
 
 /// Pays [n]'s research out of what the treasury holds after upkeep, so it

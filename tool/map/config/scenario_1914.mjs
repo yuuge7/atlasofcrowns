@@ -14,29 +14,29 @@ export const EXCLUDE_ADM0 = ['GRL', 'USA', 'FRO', 'ISL', 'AFG', 'PAK', 'MRT', 'S
  * starting level in army and industry (default 0, 0).
  */
 export const NATIONS = [
-  { tag: 'GER', name: 'German Empire', short: 'Germany', color: '#6F6C68', capital: [13.4, 52.52], ready: 1.5, tech: [2, 2] },
-  { tag: 'AUS', name: 'Austria-Hungary', short: 'Austria-Hungary', color: '#E3DAC6', capital: [16.37, 48.21], ready: 1.2, tech: [1, 1] },
-  { tag: 'RUS', name: 'Russian Empire', short: 'Russia', color: '#4C7D55', capital: [30.3, 59.94], ready: 0.9 },
-  { tag: 'OTT', name: 'Ottoman Empire', short: 'Ottomans', color: '#C9A75C', capital: [28.97, 41.01] },
-  { tag: 'UKG', name: 'United Kingdom', short: 'Britain', color: '#C9475E', capital: [-0.12, 51.5], ready: 0.8, tech: [1, 2] },
-  { tag: 'FRA', name: 'French Republic', short: 'France', color: '#3F6CC4', capital: [2.35, 48.85], tech: [1, 1] },
-  { tag: 'ITA', name: 'Kingdom of Italy', short: 'Italy', color: '#86C17A', capital: [12.5, 41.9], tech: [1, 1] },
-  { tag: 'SPA', name: 'Kingdom of Spain', short: 'Spain', color: '#E6C744', capital: [-3.7, 40.42] },
-  { tag: 'POR', name: 'Portuguese Republic', short: 'Portugal', color: '#2F9C95', capital: [-9.14, 38.72] },
-  { tag: 'NET', name: 'Kingdom of the Netherlands', short: 'Netherlands', color: '#EB8B3A', capital: [4.9, 52.37], tech: [0, 1] },
-  { tag: 'BEL', name: 'Kingdom of Belgium', short: 'Belgium', color: '#A8743B', capital: [4.35, 50.85], tech: [1, 2] },
-  { tag: 'LUX', name: 'Luxembourg', short: 'Luxembourg', color: '#8ED3DD', capital: [6.13, 49.61], tech: [0, 1] },
-  { tag: 'SWI', name: 'Swiss Confederation', short: 'Switzerland', color: '#7A2E3A', capital: [7.45, 46.95], tech: [1, 1] },
-  { tag: 'DEN', name: 'Kingdom of Denmark', short: 'Denmark', color: '#D98C7A', capital: [12.4, 55.7], tech: [0, 1] },
-  { tag: 'NOR', name: 'Kingdom of Norway', short: 'Norway', color: '#7C63B8', capital: [10.75, 59.91], tech: [0, 1] },
-  { tag: 'SWE', name: 'Kingdom of Sweden', short: 'Sweden', color: '#5AA9E6', capital: [18.07, 59.33], tech: [1, 1] },
-  { tag: 'SER', name: 'Kingdom of Serbia', short: 'Serbia', color: '#B0552F', capital: [20.46, 44.8], tech: [1, 0] },
-  { tag: 'MNE', name: 'Kingdom of Montenegro', short: 'Montenegro', color: '#3E4A8A', capital: [19.26, 42.44] },
-  { tag: 'ALB', name: 'Principality of Albania', short: 'Albania', color: '#C24A8F', capital: [19.82, 41.33] },
-  { tag: 'GRE', name: 'Kingdom of Greece', short: 'Greece', color: '#59B7D9', capital: [23.73, 37.98], tech: [1, 0] },
-  { tag: 'BUL', name: 'Tsardom of Bulgaria', short: 'Bulgaria', color: '#7A9A3B', capital: [23.32, 42.7], tech: [1, 0] },
-  { tag: 'ROM', name: 'Kingdom of Romania', short: 'Romania', color: '#E3D36A', capital: [26.1, 44.43] },
-  { tag: 'PER', name: 'Sublime State of Persia', short: 'Persia', color: '#8F6BB0', capital: [51.39, 35.69] },
+  { tag: 'GER', flag: 'h:#000000,#FFFFFF,#DD0000', name: 'German Empire', short: 'Germany', color: '#6F6C68', capital: [13.4, 52.52], ready: 1.5, tech: [2, 2] },
+  { tag: 'AUS', flag: 'h:#000000,#FFD200', name: 'Austria-Hungary', short: 'Austria-Hungary', color: '#E3DAC6', capital: [16.37, 48.21], ready: 1.2, tech: [1, 1] },
+  { tag: 'RUS', flag: 'h:#FFFFFF,#0039A6,#D52B1E', name: 'Russian Empire', short: 'Russia', color: '#4C7D55', capital: [30.3, 59.94], ready: 0.9 },
+  { tag: 'OTT', flag: 'crescent:#E30A17,#FFFFFF', name: 'Ottoman Empire', short: 'Ottomans', color: '#C9A75C', capital: [28.97, 41.01] },
+  { tag: 'UKG', flag: 'union', name: 'United Kingdom', short: 'Britain', color: '#C9475E', capital: [-0.12, 51.5], ready: 0.8, tech: [1, 2] },
+  { tag: 'FRA', flag: 'v:#0055A4,#FFFFFF,#EF4135', name: 'French Republic', short: 'France', color: '#3F6CC4', capital: [2.35, 48.85], tech: [1, 1] },
+  { tag: 'ITA', flag: 'v:#009246,#FFFFFF,#CE2B37', name: 'Kingdom of Italy', short: 'Italy', color: '#86C17A', capital: [12.5, 41.9], tech: [1, 1] },
+  { tag: 'SPA', flag: 'h:#AA151B,#F1BF00,#F1BF00,#AA151B', name: 'Kingdom of Spain', short: 'Spain', color: '#E6C744', capital: [-3.7, 40.42] },
+  { tag: 'POR', flag: 'v:#046A38,#DA291C,#DA291C', name: 'Portuguese Republic', short: 'Portugal', color: '#2F9C95', capital: [-9.14, 38.72] },
+  { tag: 'NET', flag: 'h:#AE1C28,#FFFFFF,#21468B', name: 'Kingdom of the Netherlands', short: 'Netherlands', color: '#EB8B3A', capital: [4.9, 52.37], tech: [0, 1] },
+  { tag: 'BEL', flag: 'v:#000000,#FDDA24,#EF3340', name: 'Kingdom of Belgium', short: 'Belgium', color: '#A8743B', capital: [4.35, 50.85], tech: [1, 2] },
+  { tag: 'LUX', flag: 'h:#EF3340,#FFFFFF,#00A2E1', name: 'Luxembourg', short: 'Luxembourg', color: '#8ED3DD', capital: [6.13, 49.61], tech: [0, 1] },
+  { tag: 'SWI', flag: 'swiss:#DA291C,#FFFFFF', name: 'Swiss Confederation', short: 'Switzerland', color: '#7A2E3A', capital: [7.45, 46.95], tech: [1, 1] },
+  { tag: 'DEN', flag: 'nordic:#C8102E,#FFFFFF', name: 'Kingdom of Denmark', short: 'Denmark', color: '#D98C7A', capital: [12.4, 55.7], tech: [0, 1] },
+  { tag: 'NOR', flag: 'nordic:#BA0C2F,#FFFFFF,#00205B', name: 'Kingdom of Norway', short: 'Norway', color: '#7C63B8', capital: [10.75, 59.91], tech: [0, 1] },
+  { tag: 'SWE', flag: 'nordic:#006AA7,#FECC02', name: 'Kingdom of Sweden', short: 'Sweden', color: '#5AA9E6', capital: [18.07, 59.33], tech: [1, 1] },
+  { tag: 'SER', flag: 'h:#C6363C,#0C4076,#FFFFFF', name: 'Kingdom of Serbia', short: 'Serbia', color: '#B0552F', capital: [20.46, 44.8], tech: [1, 0] },
+  { tag: 'MNE', flag: 'h:#C6363C,#0C4076,#FFFFFF', name: 'Kingdom of Montenegro', short: 'Montenegro', color: '#3E4A8A', capital: [19.26, 42.44] },
+  { tag: 'ALB', flag: 'emblem:#E41E20,#000000', name: 'Principality of Albania', short: 'Albania', color: '#C24A8F', capital: [19.82, 41.33] },
+  { tag: 'GRE', flag: 'greece', name: 'Kingdom of Greece', short: 'Greece', color: '#59B7D9', capital: [23.73, 37.98], tech: [1, 0] },
+  { tag: 'BUL', flag: 'h:#FFFFFF,#00966E,#D62612', name: 'Tsardom of Bulgaria', short: 'Bulgaria', color: '#7A9A3B', capital: [23.32, 42.7], tech: [1, 0] },
+  { tag: 'ROM', flag: 'v:#002B7F,#FCD116,#CE1126', name: 'Kingdom of Romania', short: 'Romania', color: '#E3D36A', capital: [26.1, 44.43] },
+  { tag: 'PER', flag: 'h:#239F40,#FFFFFF,#DA0000', name: 'Sublime State of Persia', short: 'Persia', color: '#8F6BB0', capital: [51.39, 35.69] },
 ];
 
 /** 1914 owner of a modern country, before the per-unit exceptions below. */
@@ -139,6 +139,43 @@ export const AREA = {
 
 /** Groups that must survive even though they are below the absorb threshold. */
 export const KEEP_GROUPS = ['LUX'];
+
+/**
+ * Sea zones for landings. Every stretch of coast belongs to the zone with the
+ * nearest of these points (lon/lat), if one lies within SEA_REACH_KM; an
+ * army may sail from its province to any coastal province on the same zone
+ * or a neighbouring one. `label` is where the name is lettered on the map.
+ * Lake shores (holes in a province) are never coast.
+ */
+export const SEA_REACH_KM = 420;
+export const SEAS = [
+  { name: 'Barents Sea', label: [41, 70.4], points: [[38, 70.5], [45, 69.5], [33, 70.2], [50, 69]], links: ['White Sea', 'Norwegian Sea'] },
+  { name: 'White Sea', label: [37.5, 65.6], points: [[38, 65.5], [36, 64.6], [40.5, 66.2], [34.8, 66.4]], links: ['Barents Sea'] },
+  { name: 'Norwegian Sea', label: [3, 66.5], points: [[5, 63.5], [10, 66.5], [15, 69], [2, 62], [19, 70.4]], links: ['Barents Sea', 'North Sea', 'Atlantic Ocean'] },
+  { name: 'North Sea', label: [3.2, 56.2], points: [[3, 56], [2, 53.2], [5, 58.5], [-1, 58.5], [7, 54.5], [0.5, 54], [3.5, 51.8]], links: ['Norwegian Sea', 'Skagerrak', 'English Channel', 'Atlantic Ocean'] },
+  { name: 'Skagerrak', label: [9.5, 57.9], points: [[9.5, 57.8], [11.3, 57], [11.8, 56.2], [12.5, 56.1]], links: ['North Sea', 'Baltic Sea'] },
+  { name: 'Baltic Sea', label: [18.5, 56.2], points: [[18, 55.5], [15, 55], [20, 57.5], [11, 54.6], [13.5, 54.6], [23.5, 57.8], [21, 55.4], [19, 59]], links: ['Skagerrak', 'Gulf of Bothnia', 'Gulf of Finland'] },
+  { name: 'Gulf of Bothnia', label: [20.5, 62.8], points: [[20, 62], [22, 64], [19, 60.8], [23.5, 65.3]], links: ['Baltic Sea'] },
+  { name: 'Gulf of Finland', label: [26.5, 59.85], points: [[26, 59.85], [28.5, 59.95], [24, 59.6], [29.8, 60]], links: ['Baltic Sea'] },
+  { name: 'English Channel', label: [-2.5, 50.1], points: [[-2, 50.1], [1, 50.6], [-4.5, 49.6], [0, 50.2], [-5.6, 49.8]], links: ['North Sea', 'Atlantic Ocean', 'Bay of Biscay'] },
+  { name: 'Irish Sea', label: [-5.1, 53.6], points: [[-5, 53.6], [-4.6, 54.6], [-5.6, 52.2], [-3.8, 53.5], [-5.6, 55.2]], links: ['Atlantic Ocean'] },
+  { name: 'Atlantic Ocean', label: [-9.5, 50], points: [[-10, 52], [-10.8, 48], [-10, 40], [-9.8, 37], [-9.9, 33], [-10.3, 30], [-7.5, 57.5], [-6, 59], [-3, 59.2], [-10.5, 54.5]], links: ['Norwegian Sea', 'North Sea', 'English Channel', 'Irish Sea', 'Bay of Biscay', 'Alboran Sea'] },
+  { name: 'Bay of Biscay', label: [-4.8, 45.6], points: [[-5, 45.5], [-3, 46.5], [-8, 44], [-2.2, 44.2], [-1.8, 46.8], [-4.5, 48]], links: ['Atlantic Ocean', 'English Channel'] },
+  { name: 'Alboran Sea', label: [-3.6, 35.95], points: [[-3.5, 36], [-5, 35.9], [-1.5, 35.8], [-4.5, 36.5], [-2.5, 36.6]], links: ['Atlantic Ocean', 'Balearic Sea'] },
+  { name: 'Balearic Sea', label: [4.6, 38.9], points: [[2, 38.5], [5, 40], [4, 37.5], [1, 36.8], [3.8, 42.6], [7, 37.4], [0.5, 39.6], [5.5, 43]], links: ['Alboran Sea', 'Ligurian Sea', 'Tyrrhenian Sea', 'Strait of Sicily'] },
+  { name: 'Ligurian Sea', label: [8.6, 43.5], points: [[8.5, 43.7], [7.3, 43.4], [10, 43.7], [9.5, 43.1]], links: ['Balearic Sea', 'Tyrrhenian Sea'] },
+  { name: 'Tyrrhenian Sea', label: [12, 39.8], points: [[12, 40.5], [11, 39], [13.5, 39.5], [10.6, 42.3], [14.8, 40.3], [15.8, 38.8], [13, 38.3], [9.8, 41]], links: ['Balearic Sea', 'Ligurian Sea', 'Strait of Sicily', 'Ionian Sea'] },
+  { name: 'Adriatic Sea', label: [15.3, 43.1], points: [[15, 43], [13, 44.5], [17, 42], [18.5, 41.3], [12.6, 45.4], [14, 45], [16.3, 41.5]], links: ['Ionian Sea'] },
+  { name: 'Ionian Sea', label: [18.9, 37.2], points: [[18, 38], [20.2, 37.4], [16.6, 37.6], [19.6, 39.6], [21.3, 36.8], [17.3, 39.7]], links: ['Adriatic Sea', 'Tyrrhenian Sea', 'Strait of Sicily', 'Aegean Sea', 'Levantine Sea'] },
+  { name: 'Strait of Sicily', label: [14.3, 34.6], points: [[12, 35.5], [15, 34], [18, 32.2], [11.2, 36.9], [20, 31.6], [11, 33.6], [14.3, 36.5], [13, 33.2], [16, 31.3]], links: ['Balearic Sea', 'Tyrrhenian Sea', 'Ionian Sea', 'Levantine Sea'] },
+  { name: 'Aegean Sea', label: [25, 38.7], points: [[25, 38.5], [24.4, 40.2], [26, 37], [25.2, 35.5], [23.4, 37.6], [26.6, 39.3], [27.7, 36.6], [23, 39.5], [25.8, 40.6], [26.2, 40.1]], links: ['Ionian Sea', 'Levantine Sea', 'Sea of Marmara'] },
+  { name: 'Sea of Marmara', label: [28.1, 40.75], points: [[28, 40.75], [27.6, 40.65], [29, 40.7]], links: ['Aegean Sea', 'Black Sea'] },
+  { name: 'Levantine Sea', label: [29.6, 33.5], points: [[30, 33.5], [33, 34.5], [34.5, 32.5], [28, 34.6], [25, 33.2], [35.4, 35.5], [31, 31.7], [32.5, 36.2], [29.5, 36]], links: ['Ionian Sea', 'Strait of Sicily', 'Aegean Sea', 'Red Sea'] },
+  { name: 'Black Sea', label: [34.2, 43.4], points: [[34, 43.5], [31, 43], [37, 44], [39.5, 41.5], [30.5, 45.5], [36.5, 46], [41.2, 42], [33, 44.7], [29, 41.4], [35, 42.3]], links: ['Sea of Marmara'] },
+  { name: 'Red Sea', label: [33.4, 29.7], points: [[33, 29], [32.6, 29.6], [34.8, 29.2], [33.7, 28.6]], links: ['Levantine Sea'] },
+  { name: 'Persian Gulf', label: [49.3, 29.5], points: [[49.5, 29.4], [48.6, 29.8], [50.5, 29], [48.4, 29.4]], links: [] },
+  { name: 'Caspian Sea', label: [50.2, 42.3], points: [[50, 42], [51, 45], [51.5, 40], [49.5, 38], [50.5, 37], [49, 46], [48, 43.5], [52, 41.5]], links: [] },
+];
 
 /**
  * Sea crossings, as lon/lat points that must fall inside the two provinces.

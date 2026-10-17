@@ -21,6 +21,10 @@ abstract final class Rules {
   /// Each side's strength is scaled by a roll in [1 - spread, 1 + spread].
   static const double combatSpread = 0.15;
 
+  // Landings
+  /// Units that land from the sea fight at this share of their strength.
+  static const double landingFactor = 0.75;
+
   // Building. One project per province per turn, finished at once.
   /// Each level of fortification adds this to a defender's cover.
   static const double fortBonus = 0.5;
@@ -70,11 +74,66 @@ abstract final class Rules {
   /// Rebels who take the province: this many times its militia.
   static const double rebelsPerMilitia = 1.5;
 
+  // Peace terms
+  /// Reparations: the loser pays this share of its income to the winner for
+  /// [reparationTurns] turns.
+  static const double reparationShare = 0.25;
+  static const int reparationTurns = 24;
+
+  /// A vassal pays its overlord this share of its income every turn.
+  static const double vassalTribute = 0.2;
+
   // Diplomacy
   static const int truceTurns = 8;
 
-  /// A peace or alliance offer stays on the table for this many end-of-turns.
+  /// A peace, alliance or pact offer stays on the table for this many
+  /// end-of-turns.
   static const int peaceOfferTurns = 2;
+
+  // Relations
+  /// How two nations feel about each other, from -[maxRelation] to
+  /// [maxRelation]; 0 is indifference.
+  static const int maxRelation = 100;
+
+  /// Relations at the start between allies, and between nations at war.
+  /// Allies grow closer by themselves up to [alliedRelation], no further.
+  static const int alliedRelation = 50;
+  static const int warRelation = -60;
+
+  /// A war, however it starts, leaves relations at this at best.
+  static const int declaredRelation = -50;
+
+  /// Peace on terms costs the loser this much with the winner, and leaving
+  /// an alliance [brokenRelation] with the old ally.
+  static const int termsRelation = -20;
+  static const int brokenRelation = -25;
+
+  /// Each turn allies grow a point closer (see [alliedRelation]) and
+  /// enemies a point further apart; everyone else drifts a point towards
+  /// indifference every [relationDriftTurns] turns.
+  static const int relationDriftTurns = 1;
+
+  /// An envoy raises relations by [envoyGain]. It costs [envoyIncomeShare]
+  /// of the receiver's income, and at least [envoyMinCost]: a great power
+  /// takes more courting than a small one.
+  static const int envoyGain = 8;
+  static const int envoyMinCost = 5;
+  static const double envoyIncomeShare = 0.5;
+
+  /// A gift worth the receiver's income for a turn raises relations by
+  /// [giftGain]; no single gift by more than [giftMaxGain].
+  static const int giftGain = 10;
+  static const int giftMaxGain = 30;
+
+  /// A non-aggression pact binds both sides for this many turns, and can be
+  /// renewed once fewer than [pactRenewTurns] are left.
+  static const int pactTurns = 36;
+  static const int pactRenewTurns = 6;
+
+  // Chronicle
+  /// The chronicle keeps at most this many samples; past it, every other
+  /// one goes and samples are taken half as often.
+  static const int chronicleSamples = 240;
 
   // Game setup
   static const double startArmyPerIncome = 1.6;
@@ -112,6 +171,16 @@ abstract final class Rules {
   /// After proposing an alliance, the AI waits this many turns before it
   /// asks the same nation again.
   static const int aiAllianceRetryTurns = 12;
+
+  /// An AI vassal throws off its overlord once it is this strong against it.
+  static const double aiIndependence = 0.75;
+
+  /// The AI allies only with nations it likes at least [aiAllyRelation], and
+  /// with one it likes [aiFriendRelation] whether or not a threat binds them.
+  /// It signs pacts with nations it likes at least [aiPactRelation].
+  static const int aiAllyRelation = -20;
+  static const int aiFriendRelation = 60;
+  static const int aiPactRelation = -20;
 
   /// Share of income, in percent, the AI puts into research at peace and
   /// at war.

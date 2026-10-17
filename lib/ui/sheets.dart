@@ -4,6 +4,7 @@ import '../data/game_assets.dart';
 import '../data/save_store.dart';
 import '../engine/rules.dart';
 import '../theme.dart';
+import 'flags.dart';
 import 'widgets.dart';
 
 /// Lists the saved games. Returns the save the player picked, opened and
@@ -49,44 +50,44 @@ class _LoadSheetState extends State<_LoadSheet> {
       title: 'Load game',
       banner: _error == null ? null : Padding(padding: const EdgeInsets.fromLTRB(20, 12, 20, 0), child: Text(_error!, style: AtlasText.body.copyWith(color: AtlasColors.signalText))),
       body: FutureBuilder<List<SaveInfo>>(
-            future: _list,
-            builder: (context, snapshot) {
-              final saves = snapshot.data;
-              if (saves == null) return const SizedBox(height: 120);
-              if (saves.isEmpty) {
-                return const Padding(
-                  padding: EdgeInsets.all(20),
-                  child: Text('No saved games yet. The game saves itself at the end of every turn.', style: AtlasText.note),
-                );
-              }
-              return ListView.builder(
-                shrinkWrap: true,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                itemCount: saves.length,
-                itemBuilder: (context, i) {
-                  final save = saves[i];
-                  final nation = widget.assets.nationOf(save.scenario, save.nation);
-                  return InkWell(
-                    onTap: () => _open(save),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
-                      child: Row(children: [
-                        NationSwatch(Color(nation?.color ?? 0xFF888888)),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text('${nation?.shortName ?? 'Watching'}, ${save.date}', style: AtlasText.body),
-                            Text('${save.isAutosave ? 'Autosave' : 'Saved'} ${_when(save.savedAt)}', style: AtlasText.note),
-                          ]),
-                        ),
-                        IconButton(onPressed: () => _delete(save), icon: const Icon(Icons.delete_outline), tooltip: 'Delete this save'),
+        future: _list,
+        builder: (context, snapshot) {
+          final saves = snapshot.data;
+          if (saves == null) return const SizedBox(height: 120);
+          if (saves.isEmpty) {
+            return const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text('No saved games yet. The game saves itself at the end of every turn.', style: AtlasText.note),
+            );
+          }
+          return ListView.builder(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            itemCount: saves.length,
+            itemBuilder: (context, i) {
+              final save = saves[i];
+              final nation = widget.assets.nationOf(save.scenario, save.nation);
+              return InkWell(
+                onTap: () => _open(save),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 8),
+                  child: Row(children: [
+                    if (nation != null) NationFlag(nation, height: 22) else const NationSwatch(AtlasColors.ivoryDim, width: 33, height: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('${nation?.shortName ?? 'Watching'}, ${save.date}', style: AtlasText.body),
+                        Text('${save.isAutosave ? 'Autosave' : 'Saved'} ${_when(save.savedAt)}', style: AtlasText.note),
                       ]),
                     ),
-                  );
-                },
+                    IconButton(onPressed: () => _delete(save), icon: const Icon(Icons.delete_outline), tooltip: 'Delete this save'),
+                  ]),
+                ),
               );
             },
-          ),
+          );
+        },
+      ),
     );
   }
 }
@@ -121,7 +122,12 @@ Future<void> showHowToPlay(BuildContext context) {
           'Until then, land held with fewer units than its militia may revolt: back to its old owner if that owner is at war with you, '
           'or as the old nation itself, risen from defeat.'
     ),
-    ('Moving', 'Units move one province a turn: across a border, or across a strait marked with a dotted line. Blue arrows are marches, red arrows are attacks.'),
+    (
+      'Moving',
+      'Units move one province a turn: across a border, or across a strait marked with a dotted line. Blue arrows are marches, red arrows are attacks. '
+          'From the coast they can also sail, in a turn, to any coastal province on the same sea or the next one; they land there at ${(Rules.landingFactor * 100).round()}% strength. '
+          'Tap any province of yours further off and the units march there by themselves, a province a turn.'
+    ),
     (
       'Battle',
       'An attack must beat the defence: the units in the province plus its militia, multiplied by $cover for being dug in '
@@ -129,11 +135,33 @@ Future<void> showHowToPlay(BuildContext context) {
     ),
     ('War and peace', 'Select a foreign province to declare war on its owner. The border opens the turn after. Peace needs both sides to agree, and a truce of ${Rules.truceTurns} turns follows.'),
     (
+      'Peace terms',
+      'An offer of peace can ask for nothing, for reparations (${(Rules.reparationShare * 100).round()}% of the loser\'s income for ${Rules.reparationTurns} turns) '
+          'or for vassalage. A vassal pays ${(Rules.vassalTribute * 100).round()}% of its income every turn, goes to war with its overlord\'s enemies and makes no war of its own, '
+          'until it declares its independence and fights for it. Peace is signed when one side accepts what the other asks.'
+    ),
+    (
       'Alliances',
       'An alliance needs both sides to agree. When someone declares war on one of you, the other joins the war at once. '
           'A war you start yourself stays yours: allies are not dragged into it. You can leave an alliance at any time, but not attack the ally in the same turn.'
     ),
-    ('Winning', 'Hold the share of provinces chosen at the start and the war is yours. Lose your last province and it is over.'),
+    (
+      'Relations',
+      'Every nation feels something about you, from -${Rules.maxRelation} to +${Rules.maxRelation}. War sours it, alliances warm it, and in peace it drifts back towards indifference. '
+          'Tap Diplomacy on a foreign province to send an envoy (+${Rules.envoyGain}) or a gift of gold. Friends (+${Rules.aiFriendRelation}) accept an alliance even without a common enemy, '
+          'and nations look first for wars against those they dislike.'
+    ),
+    (
+      'Pacts',
+      'A non-aggression pact needs both sides to agree. For ${Rules.pactTurns} turns neither may declare war on the other, '
+          'and neither joins a war against the other through an alliance.'
+    ),
+    (
+      'Events',
+      'Harvests, strikes, fires, epidemics and inventors come by chance. Some ask you to choose: your answer takes effect at the end of the turn. '
+          'They can be turned off when a game is set up.'
+    ),
+    ('Winning', 'Hold the share of provinces chosen at the start, your vassals\' included, and the war is yours. Lose your last province and it is over.'),
   ];
   return showAtlasSheet<void>(
     context,

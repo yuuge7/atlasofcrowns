@@ -48,8 +48,22 @@ move at the same moment when the turn ends.
   nation is never pushed into a war; it is offered the alliance instead.
 - **Simultaneous turns.** Everyone's orders resolve at once. Reinforcements
   arrive before attacks, and an army that marches away no longer defends.
-- **Alliances.** Propose one, accept one, leave one. Declare war on a nation
-  and its allies declare war on you in the same turn.
+  Each turn then plays out on the map: armies march, ships sail, battles
+  flare up, before the new position shows.
+- **Across the sea.** 26 named sea zones. From the coast an army can sail
+  in one turn to any coast on the same sea or the next one, and land at
+  three quarters of its strength.
+- **Alliances, pacts and relations.** Propose an alliance, accept one, leave
+  one; declare war on a nation and its allies declare war on you in the same
+  turn. Every nation feels something about you, from -100 to +100: send
+  envoys and gifts to win it over, sign a non-aggression pact to keep a
+  neighbour quiet while you fight elsewhere.
+- **Peace on terms.** Ask for nothing, for reparations (a quarter of the
+  loser's income for two years) or for vassalage. A vassal pays tribute,
+  fights its overlord's wars and may one day declare its independence.
+- **Events.** Harvests, epidemics, fires, railways, border incidents and
+  state visits come by chance; strikes, refugees and inventors ask you how
+  to answer.
 - **Forts and development.** Build a fort or a fortress in a province, or
   develop it for more income.
 - **Research.** Put a share of the income into army technology (every unit
@@ -59,21 +73,27 @@ move at the same moment when the turn ends.
   fallen nation risen again.
 - **Long marches.** Send an army to any of your provinces, however far; it
   walks there on its own, one province a turn.
-- **Map modes.** Political, diplomatic (allies, enemies, truces) and economic.
+- **Map modes.** Political, diplomatic (allies, enemies, truces, pacts),
+  relations (how each nation feels about you) and economic.
+- **Statistics.** Provinces, armies and income of the leading powers over
+  the whole game, as charts you can read month by month.
+- **Flags** for every nation of both scenarios, drawn in code.
 - **Your game, your rules.** Three lengths, three difficulties (the AI earns
-  80%, 100% or 125%), fog of war on or off.
+  80%, 100% or 125%), fog of war on or off, random events on or off.
 - **An AI for every nation.** It holds its fronts, attacks what it can
-  overwhelm, gathers its army when it cannot, seeks allies against a shared
-  threat, garrisons its conquests, builds, researches, sues for peace when a
-  war goes nowhere and grows bolder the longer it sits idle.
+  overwhelm (overland or from the sea), gathers its army when it cannot,
+  seeks allies against a shared threat, signs pacts to cover a flank, courts
+  the powers that worry it, garrisons its conquests, builds, researches,
+  demands terms when winning, sues for peace when a war goes nowhere and
+  grows bolder the longer it sits idle.
 - **Readable combat.** The sheet shows what a province defends with and the
   odds of the attack you are about to order.
 - **Saves.** The game saves itself every turn; manual saves on top.
 - **Built for one hand.** Portrait only, map edge to edge, End turn under the
   right thumb.
 
-Not in the game yet: navies and sea zones, peace terms beyond the front line,
-vassals, sound, other maps.
+Not in the game yet: fleets and naval battles, trading provinces at the
+peace table, sound, other maps.
 
 ## Install
 
@@ -88,13 +108,14 @@ older one and keeps your saved games.
 ## How to play
 
 1. **Pick a scenario and a nation** by tapping it on the map, set the length,
-   difficulty and fog of war, and start.
+   difficulty, fog of war and random events, and start.
 2. **Give orders.** Tap one of your provinces to recruit, build or move its
    units: to a neighbouring province, or to any province of yours further off
    for a march of several turns. Moving into a province of a nation you are
    at war with is an attack. Blue arrows are marches, red arrows attacks.
-   Tap a foreign province for diplomacy. The flask opens research, the globe
-   the list of powers, the layers button the map modes.
+   Tap a foreign province for war, peace and alliances, and its Diplomacy
+   button for envoys, gifts and pacts. The flask opens research, the globe
+   the list of powers and the statistics, the layers button the map modes.
 3. **End the turn.** All nations move at once, battles are fought, and the
    dispatches tell you what happened.
 
@@ -102,13 +123,17 @@ older one and keeps your saved games.
 |---|---|
 | Recruiting | 4 gold per unit. A province raises up to 2 plus its income each turn. New units defend at once and march from the next turn. |
 | Upkeep | Every 4 units cost 1 gold a turn. An empty treasury makes units desert. |
-| Movement | One province a turn, across a border or a strait marked with a dotted line. |
+| Movement | One province a turn, across a border or a strait marked with a dotted line. From the coast, a turn's sail to any coast on the same sea or the next; the troops land at 75% strength. |
 | Battle | Attackers must beat the defenders plus the province's militia, multiplied by 1.5 for being dug in, 0.5 more per fort level and 0.5 more in a capital. Army technology adds 5% per level to either side. Each side then rolls 15% up or down. The loser is destroyed. |
 | Diplomacy | Tap a foreign province to declare war on its owner; the border opens the turn after, and the owner's allies join at once. Peace needs both sides and is followed by a truce of 8 turns. An alliance needs both sides too. |
+| Peace terms | A peace offer can ask for reparations (25% of the loser's income for 24 turns) or vassalage (20% of its income for good, and its wars are the overlord's). Peace is signed when one side accepts what the other asks. |
+| Relations | From -100 to +100. War sours them, alliances warm them, peace lets them drift back to 0. An envoy gives +8 for half the receiver's income; a gift of a turn of their income gives +10, at most +30. At +60 a nation accepts an alliance even without a common enemy. |
+| Pacts | A non-aggression pact needs both sides and lasts 36 turns: neither may declare war on the other, nor join a war against it through an alliance. |
+| Events | Each turn a nation has about one chance in six that something happens, more at war. A choice is answered with the next turn's orders; no answer takes the course that costs nothing. |
 | Building | One project per province a turn. A fort level costs 40 gold times the level and 1 gold a turn; a province falls with one level less. Development adds 1 income for 20 gold, 15 more for each further level, up to 5. |
 | Research | A share of income (0 to 50%) goes into army or industry. A level costs 2 turns of income times the level reached. Army: +5% strength a level. Industry: +4% income a level. |
 | Conquest | Land taken from its owner at the start yields 50% of its income, rising to all of it over 24 turns. Until then, held with fewer units than its militia, it may revolt. |
-| Winning | Hold the chosen share of all provinces. Lose your last province and the game is over. |
+| Winning | Hold the chosen share of all provinces, your vassals' included. Lose your last province and the game is over. |
 
 The same rules are in the game under **How to play**.
 
@@ -171,6 +196,8 @@ lib/
     state.dart      everything that changes; a save file is this as JSON
     orders.dart     what a nation asks for in one turn
     resolve.dart    resolves one turn for every nation at once
+    happenings.dart events by chance: harvests, strikes, inventors...
+    events.dart     what a turn reports: events and every move made
     ai.dart         plans a turn for an AI nation
     game.dart       world + state, and the questions the UI and the AI ask
     rules.dart      every tunable number of the game
@@ -178,10 +205,11 @@ lib/
   map/        Province geometry, camera (pan and zoom), painters, MapView
   game/       GameController: the player's orders, selection and input mode
   data/       Asset loading and the save files
-  ui/         Screens and sheets
+  ui/         Screens and sheets: province, diplomacy, research,
+              statistics, dispatches; flags.dart draws every flag
   theme.dart  Colours, fonts and text styles
 assets/
-  map/europe.json         province shapes and adjacency                 (generated)
+  map/europe.json         province shapes, adjacency and sea zones      (generated)
   scenarios/1914.json     The Great War: nations, owners, income, wars,
                           alliances, forts, technology, history          (generated)
   scenarios/modern.json   Europe today, on the same provinces            (generated)

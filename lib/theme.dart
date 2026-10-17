@@ -32,6 +32,16 @@ abstract final class AtlasColors {
   static const mapTruce = Color(0xFFA9AE9F);
   static const mapNeutral = Color(0xFFDCD3BD);
 
+  /// A vassal of the player's, or the player's overlord.
+  static const mapBound = Color(0xFFA9C0E6);
+
+  /// Diplomacy map: a non-aggression pact.
+  static const mapPact = Color(0xFFB9C79A);
+
+  /// Relations map: the friendly end of the scale; the hostile end is
+  /// [mapEnemy], indifference [mapNeutral].
+  static const mapFriend = Color(0xFF5F9C6A);
+
   /// Economy: ivory for the poorest land, through brass, to dark bronze.
   static const mapPoor = Color(0xFFEFE7D3);
   static const mapMiddling = Color(0xFFC8A24A);
@@ -146,6 +156,13 @@ const int incomeMiddling = 12;
 Color incomeColor(int income) {
   final t = (income / (2 * incomeMiddling)).clamp(0.0, 1.0);
   return t < 0.5 ? Color.lerp(AtlasColors.mapPoor, AtlasColors.mapMiddling, t * 2)! : Color.lerp(AtlasColors.mapMiddling, AtlasColors.mapRich, t * 2 - 1)!;
+}
+
+/// Fill for relations [value], from -100 (hostile) through indifference at
+/// 0 to 100 (friendly).
+Color relationColor(int value) {
+  final t = (value / 100).clamp(-1.0, 1.0);
+  return t < 0 ? Color.lerp(AtlasColors.mapNeutral, AtlasColors.mapEnemy, -t)! : Color.lerp(AtlasColors.mapNeutral, AtlasColors.mapFriend, t)!;
 }
 
 /// Black or ivory, whichever reads on [background].

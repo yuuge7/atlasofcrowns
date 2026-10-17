@@ -11,6 +11,7 @@ import '../map/map_painters.dart';
 import '../map/map_scene.dart';
 import '../map/map_view.dart';
 import '../theme.dart';
+import 'flags.dart';
 import 'game_screen.dart';
 import 'sheets.dart';
 import 'widgets.dart';
@@ -237,6 +238,7 @@ class _NationSelectState extends State<NationSelect> {
   double _winFraction = Rules.defaultWinFraction;
   int _difficulty = Rules.normalDifficulty;
   bool _fog = false;
+  bool _events = true;
 
   MapScene _sceneFor(World world) => MapScene(widget.assets.geometry, world)..setOwners(world.startOwners);
 
@@ -289,6 +291,7 @@ class _NationSelectState extends State<NationSelect> {
       winFraction: _winFraction,
       difficulty: _difficulty,
       fog: _fog,
+      randomEvents: _events,
     );
     final controller = GameController(assets: widget.assets, saves: widget.saves, game: game)..autosave();
     _play(context, controller);
@@ -344,7 +347,7 @@ class _NationSelectState extends State<NationSelect> {
           padding: EdgeInsets.fromLTRB(16, 14, 16, 14 + MediaQuery.paddingOf(context).bottom),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
             Row(children: [
-              NationSwatch(Color(nation.color), height: 40),
+              NationFlag(nation, height: 32),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -386,13 +389,24 @@ class _NationSelectState extends State<NationSelect> {
                   onTap: () => setState(() => _difficulty = (_difficulty + 1) % _difficulties.length),
                 ),
               ),
-              const SizedBox(width: 8),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
               Expanded(
                 child: _Setting(
                   label: 'Fog of war',
                   value: _fog ? 'On' : 'Off',
                   note: _fog ? 'Armies near you' : 'All armies seen',
                   onTap: () => setState(() => _fog = !_fog),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _Setting(
+                  label: 'Random events',
+                  value: _events ? 'On' : 'Off',
+                  note: _events ? 'Strikes, harvests' : 'None by chance',
+                  onTap: () => setState(() => _events = !_events),
                 ),
               ),
             ]),

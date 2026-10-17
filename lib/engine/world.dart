@@ -10,6 +10,7 @@ class Province {
     required this.adj,
     required this.sea,
     required this.income,
+    this.coast = const [],
   }) : links = List.unmodifiable([...adj, ...sea]);
 
   final int id;
@@ -25,10 +26,23 @@ class Province {
   /// Neighbors across a strait.
   final List<int> sea;
 
-  /// Everywhere an army can go from here in one turn.
+  /// Everywhere an army can go overland, or across a strait, in one turn.
   final List<int> links;
 
   final int income;
+
+  /// Ids of the sea zones its coast touches; empty inland.
+  final List<int> coast;
+}
+
+/// A stretch of sea armies can be shipped across.
+class SeaZone {
+  const SeaZone(this.name, this.adj);
+
+  final String name;
+
+  /// Ids of the zones next to it.
+  final List<int> adj;
 }
 
 class Nation {
@@ -41,6 +55,7 @@ class Nation {
     required this.capital,
     this.readiness = 1,
     this.tech = const [0, 0],
+    this.flag = '',
   });
 
   final int id;
@@ -60,6 +75,10 @@ class Nation {
 
   /// Starting level in each research field, by field index.
   final List<int> tech;
+
+  /// How the flag is drawn, e.g. `h:#000000,#FFFFFF,#DD0000` for three
+  /// stripes (the UI reads it).
+  final String flag;
 }
 
 /// Something that happened in history on a given turn, replayed when the
@@ -98,6 +117,7 @@ class World {
     this.startAlliances = const [],
     this.aggression = 1,
     this.history = const [],
+    this.seas = const [],
     List<int>? startForts,
   }) : startForts = startForts ?? List.filled(provinces.length, 0);
 
@@ -111,6 +131,7 @@ class World {
     final income = (scenario['income'] as List).cast<int>();
     // A scenario may name the provinces for its own time.
     final names = (scenario['names'] as List?)?.cast<String>();
+    final coast = (map['coast'] as List?)?.map((c) => (c as List).cast<int>()).toList();
     final provinces = [
       for (final p in (map['provinces'] as List).cast<Map<String, dynamic>>())
         Province(
@@ -121,6 +142,7 @@ class World {
           adj: List.unmodifiable((p['adj'] as List).cast<int>()),
           sea: List.unmodifiable((p['sea'] as List).cast<int>()),
           income: income[p['id'] as int],
+          coast: coast?[p['id'] as int] ?? const [],
         ),
     ];
     final rawNations = (scenario['nations'] as List).cast<Map<String, dynamic>>();
@@ -135,6 +157,7 @@ class World {
           capital: rawNations[i]['capital'] as int,
           readiness: (rawNations[i]['readiness'] as num? ?? 1).toDouble(),
           tech: (rawNations[i]['tech'] as List?)?.cast<int>() ?? const [0, 0],
+          flag: rawNations[i]['flag'] as String? ?? '',
         ),
     ];
     return World(
@@ -145,6 +168,9 @@ class World {
       startMonth: scenario['startMonth'] as int,
       aggression: (scenario['aggression'] as num? ?? 1).toDouble(),
       history: [for (final e in scenario['history'] as List? ?? const []) HistoryEvent.fromJson(e as Map<String, dynamic>)],
+      seas: [
+        for (final z in (map['seas'] as List? ?? const []).cast<Map<String, dynamic>>()) SeaZone(z['name'] as String, (z['adj'] as List).cast<int>()),
+      ],
       provinces: provinces,
       nations: nations,
       startOwners: (scenario['owners'] as List).cast<int>(),
@@ -166,6 +192,32 @@ class World {
 
   /// Scripted events, by turn.
   final List<HistoryEvent> history;
+
+  final List<SeaZone> seas;
+
+  /// For every province, the coastal provinces an army can sail to from
+  /// it: those on the same sea zone or a neighbouring one, less the ones it
+  /// can reach overland anyway.
+  late final List<Set<int>> landings = () {
+    final onZone = List.generate(seas.length, (_) => <int>[]);
+    for (final p in provinces) {
+      for (final z in p.coast) {
+        onZone[z].add(p.id);
+      }
+    }
+    return [
+      for (final p in provinces)
+        {
+          for (final z in {...p.coast, for (final z in p.coast) ...seas[z].adj})
+            for (final q in onZone[z])
+              if (q != p.id && !p.links.contains(q)) q,
+        },
+    ];
+  }();
+
+  /// Whether an army in [from] can reach [to] in one turn, overland, across
+  /// a strait or by sea.
+  bool reaches(int from, int to) => provinces[from].links.contains(to) || landings[from].contains(to);
   final List<Province> provinces;
   final List<Nation> nations;
   final List<int> startOwners;

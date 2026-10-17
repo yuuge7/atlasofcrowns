@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../engine/orders.dart';
 import '../engine/rules.dart';
+import '../engine/state.dart';
 import '../game/game_controller.dart';
 import '../theme.dart';
+import 'diplomacy_sheet.dart';
+import 'flags.dart';
 import 'widgets.dart';
 
 /// The panel at the bottom of the game screen: what the selected province
@@ -31,7 +34,7 @@ class ProvinceSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
-            NationSwatch(Color(nation.color)),
+            NationFlag(nation, height: 22),
             const SizedBox(width: 10),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -64,12 +67,15 @@ class ProvinceSheet extends StatelessWidget {
     };
     final seat = '${capital ? ', capital' : ''}$fort';
     if (mine) return 'Yours$seat';
-    final name = c.world.nations[owner].name;
+    final lord = c.game.overlordOf(owner);
+    final name = '${c.world.nations[owner].name}${lord >= 0 && lord != c.human ? ', vassal of ${c.world.nations[lord].shortName}' : ''}';
     if (!c.commanding) return '$name$seat';
     return switch (c.relationTo(owner)) {
+      Relation.bound => c.game.overlordOf(owner) == c.human ? '$name$seat. Your vassal' : '$name$seat. Your overlord',
       Relation.war => '$name$seat. At war with you',
       Relation.ally => '$name$seat. Your ally',
       Relation.truce => '$name$seat. Truce, ${c.game.truceLeft(c.human, owner)} more turns',
+      Relation.pact => '$name$seat. Pact, ${c.game.pactLeft(c.human, owner)} more turns',
       Relation.peace || Relation.you => '$name$seat. At peace with you',
     };
   }
@@ -146,11 +152,13 @@ class _OwnProvince extends StatelessWidget {
 
 String _moveText(GameController c, MoveOrder m) {
   final march = c.marchOf(m);
+  final place = c.world.provinces[m.to].name;
   if (march != null) {
     final turns = march.ahead.length;
     return 'March to ${c.world.provinces[march.to].name} with ${m.count}, $turns ${turns == 1 ? 'turn' : 'turns'}';
   }
-  return '${c.isHostile(m.to) ? 'Attack' : 'Send to'} ${c.world.provinces[m.to].name} with ${m.count}';
+  if (!c.world.provinces[m.from].links.contains(m.to)) return '${c.isHostile(m.to) ? 'Land in' : 'Ship to'} $place with ${m.count}';
+  return '${c.isHostile(m.to) ? 'Attack' : 'Send to'} $place with ${m.count}';
 }
 
 class _OrderRow extends StatelessWidget {
@@ -183,13 +191,14 @@ class _PickTarget extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = controller;
     final atWar = c.targetsFrom(c.selected).any(c.isHostile);
+    final sea = c.overlay.landings.isNotEmpty ? ' Provinces shaded blue lie across the sea: troops sail there in a turn and land at ${(Rules.landingFactor * 100).round()}% strength.' : '';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Text(
           atWar
-              ? 'Tap a highlighted province: one of yours to reinforce it, an enemy one to attack. Or tap any province of yours further off to march there.'
-              : 'Tap a highlighted province to send units there, or any province of yours further off to march there.',
+              ? 'Tap a highlighted province: one of yours to reinforce it, an enemy one to attack. Or tap any province of yours further off to march there.$sea'
+              : 'Tap a highlighted province to send units there, or any province of yours further off to march there.$sea',
           style: AtlasText.body,
         ),
       ),
@@ -209,8 +218,11 @@ class _MoveAmount extends StatelessWidget {
     final to = c.moveTarget;
     final target = c.world.provinces[to].name;
     final hostile = c.isHostile(to);
-    final turns = c.marchTurns(c.selected, to);
+    final direct = c.game.canMove(c.human, c.selected, to);
+    final bySea = direct && !c.world.provinces[c.selected].links.contains(to);
+    final turns = direct ? 0 : c.marchTurns(c.selected, to);
     final march = turns > 0;
+    final landing = bySea ? ' By sea: your troops land at ${(Rules.landingFactor * 100).round()}% strength.' : '';
     final String line;
     if (march) {
       line = 'A march of $turns turns through your own land, one province a turn. They go on by themselves; cancel the order to stop them.';
@@ -218,21 +230,24 @@ class _MoveAmount extends StatelessWidget {
       final cover = c.game.defenseMultiplier(to);
       final army = c.game.techLevel(c.state.owner[to], Field.army);
       line = '$target defends with strength ${c.game.defenseStrength(to)}: ${c.state.units[to]} units and ${c.game.militia(to)} militia, '
-          'dug in ×$cover${army > 0 ? ', army level $army' : ''}. Each side then rolls ±${(Rules.combatSpread * 100).round()}%.';
+          'dug in ×$cover${army > 0 ? ', army level $army' : ''}.$landing Each side then rolls ±${(Rules.combatSpread * 100).round()}%.';
     } else {
-      line = 'They arrive at the end of the turn, before any attack on $target.';
+      line = bySea ? 'They sail at once and land at the end of the turn, before any attack on $target.' : 'They arrive at the end of the turn, before any attack on $target.';
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       Padding(
         padding: const EdgeInsets.only(top: 12, bottom: 4),
-        child: Text(hostile ? 'Attack $target' : (march ? 'March to $target' : 'Send units to $target'), style: AtlasText.body.copyWith(color: hostile ? AtlasColors.signalText : AtlasColors.ivory)),
+        child: Text(
+          hostile ? (bySea ? 'Land in $target' : 'Attack $target') : (march ? 'March to $target' : (bySea ? 'Ship units to $target' : 'Send units to $target')),
+          style: AtlasText.body.copyWith(color: hostile ? AtlasColors.signalText : AtlasColors.ivory),
+        ),
       ),
       Text(line, style: AtlasText.note),
       AmountPicker(
         key: ValueKey('move-${c.selected}-$to'),
         max: c.movable(c.selected),
-        confirmLabel: (n) => hostile ? 'Attack with $n' : (march ? 'March $n' : 'Send $n'),
-        verdict: hostile ? (n) => _odds(n + c.headingTo(to), c.game.armyFactor(c.human), c.game.defenseStrength(to), c.headingTo(to)) : null,
+        confirmLabel: (n) => hostile ? (bySea ? 'Land with $n' : 'Attack with $n') : (march ? 'March $n' : (bySea ? 'Ship $n' : 'Send $n')),
+        verdict: hostile ? (n) => _odds(n + c.headingTo(to), c.game.armyFactor(c.human) * (bySea ? Rules.landingFactor : 1), c.game.defenseStrength(to), c.headingTo(to)) : null,
         onConfirm: c.confirmMove,
         onCancel: c.cancelInput,
       ),
@@ -339,43 +354,6 @@ class _BuildChoice extends StatelessWidget {
   }
 }
 
-/// What the player and another nation say to each other about an offer
-/// that needs both sides: peace, or an alliance.
-class _OfferWords {
-  const _OfferWords({
-    required this.signed,
-    required this.sent,
-    required this.offered,
-    required this.waiting,
-    required this.accept,
-    required this.withdraw,
-    required this.pending,
-    required this.propose,
-  });
-
-  /// Notes: both sides agree; the player's offer goes out; theirs is in;
-  /// the player's is unanswered.
-  final String signed;
-  final String sent;
-  final String offered;
-  final String waiting;
-
-  /// Buttons.
-  final String accept;
-  final String withdraw;
-  final String pending;
-  final String propose;
-}
-
-/// The note, if any, and the button for an offer between the player and
-/// another nation.
-(String?, Widget) _offerAction(_OfferWords words, {required bool theyOffer, required bool weOffer, required bool standing, required ValueChanged<bool> answer}) {
-  if (weOffer) return (theyOffer ? words.signed : words.sent, OutlinedButton(onPressed: () => answer(false), child: Text(words.withdraw)));
-  if (theyOffer) return (words.offered, FilledButton(onPressed: () => answer(true), child: Text(words.accept)));
-  if (standing) return (words.waiting, OutlinedButton(onPressed: null, child: Text(words.pending)));
-  return (null, OutlinedButton(onPressed: () => answer(true), child: Text(words.propose)));
-}
-
 class _ForeignProvince extends StatelessWidget {
   const _ForeignProvince(this.controller);
 
@@ -392,24 +370,44 @@ class _ForeignProvince extends StatelessWidget {
     String? note;
     switch (c.relationTo(owner)) {
       case Relation.war:
-        final (said, button) = _offerAction(
-          _OfferWords(
-            signed: 'Peace with $name will be signed at the end of the turn.',
-            sent: 'Your peace offer goes to $name at the end of the turn.',
-            offered: '$name offers peace.',
+        final theirs = c.game.hasPeaceOffer(owner, c.human) ? c.game.peaceTermsOf(owner, c.human) : null;
+        final ours = c.orders.peaceTerms[owner] ?? Terms.white;
+        final (said, button) = offerAction(
+          OfferWords(
+            signed: 'Peace with $name will be signed at the end of the turn${_termsLine(theirs ?? Terms.white, name)}.',
+            sent: 'Your peace offer${_askLine(ours)} goes to $name at the end of the turn.',
+            offered: '$name offers peace${_termsLine(theirs ?? Terms.white, name)}.',
             waiting: '$name has your peace offer and has not answered.',
             accept: 'ACCEPT PEACE',
             withdraw: 'WITHDRAW THE OFFER',
             pending: 'PEACE OFFERED',
             propose: 'OFFER PEACE',
           ),
-          theyOffer: c.game.hasPeaceOffer(owner, c.human),
+          theyOffer: theirs != null,
           weOffer: c.orders.offerPeace.contains(owner),
           standing: c.game.hasPeaceOffer(c.human, owner),
           answer: (yes) => c.setPeaceOffered(owner, yes),
         );
-        note = said ?? 'To attack, select one of your provinces next to this one and choose Move.';
-        actions.add(button);
+        final took = c.state.gains[directedKey(c.human, owner)] ?? 0;
+        final lost = c.state.gains[directedKey(owner, c.human)] ?? 0;
+        final score = 'In this war you took $took of their provinces and they took $lost of yours.';
+        note = '${said ?? 'To attack, select one of your provinces next to this one and choose Move.'} $score';
+        final proposing = !c.orders.offerPeace.contains(owner) && theirs == null && !c.game.hasPeaceOffer(c.human, owner);
+        actions.add(proposing ? OutlinedButton(onPressed: () => _choosePeace(context, owner), child: const Text('OFFER PEACE')) : button);
+      case Relation.bound:
+        if (c.game.overlordOf(owner) == c.human) {
+          note = 'Your vassal pays you ${(Rules.vassalTribute * 100).round()}% of its income and fights your wars.';
+        } else if (c.orders.declareIndependence) {
+          note = 'You throw off $name at the end of the turn, and are at war with it from then.';
+          actions.add(OutlinedButton(onPressed: () => c.setIndependence(false), child: const Text('STAY LOYAL')));
+        } else {
+          note = 'Your overlord takes ${(Rules.vassalTribute * 100).round()}% of your income and its wars are yours.';
+          actions.add(FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AtlasColors.signal, foregroundColor: AtlasColors.ivory),
+            onPressed: () => _confirmIndependence(context, owner),
+            child: const Text('DECLARE INDEPENDENCE'),
+          ));
+        }
       case Relation.ally:
         if (c.orders.breakAlliance.contains(owner)) {
           note = 'You leave the alliance with $name at the end of the turn.';
@@ -418,14 +416,14 @@ class _ForeignProvince extends StatelessWidget {
           note = 'Allies: if either of you is attacked, the other joins the war.';
           actions.add(OutlinedButton(onPressed: () => _confirmLeave(context, owner), child: const Text('LEAVE THE ALLIANCE')));
         }
-      case Relation.truce || Relation.peace || Relation.you:
+      case Relation.truce || Relation.pact || Relation.peace || Relation.you:
         if (c.orders.declareWar.contains(owner)) {
           note = 'War on $name begins at the end of the turn. Your armies may cross the border from next turn.';
           actions.add(OutlinedButton(onPressed: () => c.setWarDeclared(owner, false), child: const Text('CALL IT OFF')));
           break;
         }
-        final (said, button) = _offerAction(
-          _OfferWords(
+        final (said, button) = offerAction(
+          OfferWords(
             signed: 'The alliance with $name will be signed at the end of the turn.',
             sent: 'Your alliance offer goes to $name at the end of the turn.',
             offered: '$name proposes an alliance.',
@@ -443,9 +441,15 @@ class _ForeignProvince extends StatelessWidget {
         note = said;
         actions.add(button);
         final truce = c.game.truceLeft(c.human, owner);
-        if (truce > 0) {
+        final pact = c.game.pactLeft(c.human, owner);
+        if (c.game.overlordOf(c.human) >= 0) {
+          note ??= 'As a vassal you go to war only alongside your overlord.';
+        } else if (truce > 0) {
           note ??= 'Truce with $name for $truce more turns.';
           actions.add(const OutlinedButton(onPressed: null, child: Text('TRUCE')));
+        } else if (pact > 0) {
+          note ??= 'Non-aggression pact with $name for $pact more turns.';
+          actions.add(const OutlinedButton(onPressed: null, child: Text('PACT')));
         } else {
           actions.add(FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AtlasColors.signal, foregroundColor: AtlasColors.ivory),
@@ -454,8 +458,25 @@ class _ForeignProvince extends StatelessWidget {
           ));
         }
     }
+    final feeling = c.feeling(owner);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
       _Stats(c),
+      if (owner != c.human)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(children: [
+            Text('RELATIONS', style: AtlasText.label),
+            const SizedBox(width: 10),
+            Text(signed(feeling), style: AtlasText.figure.copyWith(fontSize: 17, color: feeling < 0 ? AtlasColors.signalText : AtlasColors.ivory)),
+            const SizedBox(width: 6),
+            Expanded(child: Text(feelingWord(feeling), style: AtlasText.note, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            TextButton.icon(
+              onPressed: () => showDiplomacy(context, c, owner),
+              icon: const Icon(Icons.handshake_outlined, size: 18),
+              label: Text(_courting(c, owner) ? 'DIPLOMACY •' : 'DIPLOMACY'),
+            ),
+          ]),
+        ),
       if (note != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(note, style: AtlasText.note)),
       Row(children: [
         for (var i = 0; i < actions.length; i++) ...[
@@ -464,6 +485,80 @@ class _ForeignProvince extends StatelessWidget {
         ],
       ]),
     ]);
+  }
+
+  /// Whether the player has something under way with [owner] in the
+  /// diplomacy sheet, or a pact offer from it to answer.
+  static bool _courting(GameController c, int owner) => c.orders.envoys.contains(owner) || c.orders.gifts.containsKey(owner) || c.orders.offerPact.contains(owner) || c.pactOffers.contains(owner);
+
+  /// What [name]'s offer on [terms] asks of the player, after "peace".
+  static String _termsLine(Terms terms, String name) => switch (terms) {
+        Terms.reparations => ' if you pay reparations: ${(Rules.reparationShare * 100).round()}% of your income for ${Rules.reparationTurns} turns',
+        Terms.vassal => ' if you become its vassal',
+        Terms.white || Terms.accept => '',
+      };
+
+  /// What the player's own offer asks, after "your peace offer".
+  static String _askLine(Terms terms) => switch (terms) {
+        Terms.reparations => ', asking reparations,',
+        Terms.vassal => ', asking vassalage,',
+        Terms.white || Terms.accept => '',
+      };
+
+  /// Lets the player choose what to ask for peace.
+  Future<void> _choosePeace(BuildContext context, int owner) async {
+    final c = controller;
+    final name = c.world.nations[owner].shortName;
+    Widget choice(Terms terms, String title, String note) {
+      final allowed = c.game.canDemand(c.human, owner, terms);
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: ChoiceTile(
+          selected: false,
+          onTap: allowed ? () => Navigator.pop(context, terms) : () {},
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text(title, style: AtlasText.body.copyWith(color: allowed ? AtlasColors.ivory : AtlasColors.ivoryDim)),
+            Text(note, style: AtlasText.note),
+          ]),
+        ),
+      );
+    }
+
+    final terms = await showDialog<Terms>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Peace with $name'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          choice(Terms.white, 'White peace', 'Each keeps what it holds today.'),
+          choice(Terms.reparations, 'Demand reparations', '$name pays you ${(Rules.reparationShare * 100).round()}% of its income for ${Rules.reparationTurns} turns.'),
+          choice(
+              Terms.vassal,
+              'Demand vassalage',
+              c.game.canDemand(c.human, owner, Terms.vassal)
+                  ? '$name pays you ${(Rules.vassalTribute * 100).round()}% of its income for good and fights your wars.'
+                  : 'Not while $name has vassals of its own.'),
+          Text('They only accept terms when they are losing.', style: AtlasText.note),
+        ]),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('KEEP FIGHTING'))],
+      ),
+    );
+    if (terms != null) c.offerPeace(owner, terms);
+  }
+
+  Future<void> _confirmIndependence(BuildContext context, int owner) async {
+    final c = controller;
+    final lord = c.world.nations[owner];
+    final army = c.armyOf(owner);
+    final sure = await confirm(
+      context,
+      title: 'Throw off ${lord.shortName}?',
+      body: '${lord.name} ${army != null ? 'fields $army units' : 'holds ${c.game.provinceCount(owner)} provinces'}. You stop paying tribute, and it will go to war with you at once.',
+      no: 'STAY LOYAL',
+      yes: 'DECLARE INDEPENDENCE',
+      danger: true,
+    );
+    if (sure) c.setIndependence(true);
   }
 
   Future<void> _confirmWar(BuildContext context, int owner) async {

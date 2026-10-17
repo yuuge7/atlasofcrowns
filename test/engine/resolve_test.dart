@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:atlasofcrowns/engine/events.dart';
 import 'package:atlasofcrowns/engine/game.dart';
+import 'package:atlasofcrowns/engine/happenings.dart';
 import 'package:atlasofcrowns/engine/orders.dart';
 import 'package:atlasofcrowns/engine/rng.dart';
 import 'package:atlasofcrowns/engine/resolve.dart';
@@ -75,8 +76,10 @@ void main() {
   group('movement', () {
     test('between own provinces just relocates', () {
       final g = gameWith(line, units: [7, 1, 0, 0]);
-      turn(g, {0: Orders()..moves.add(const MoveOrder(0, 1, 5))});
+      final r = turn(g, {0: Orders()..moves.add(const MoveOrder(0, 1, 5))});
       expect(g.state.units.sublist(0, 2), [2, 6]);
+      final move = r.movements.single;
+      expect((move.nation, move.from, move.to, move.count, move.hostile), (0, 0, 1, 5, false));
     });
 
     test('never sends more than the province holds', () {
@@ -550,6 +553,350 @@ void main() {
     });
   });
 
+  group('peace terms', () {
+    // 0 | 1 | 2, with 0 and 1 at war.
+    final row = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1],
+      ],
+      owners: [0, 1, 2],
+      wars: [
+        [0, 1],
+      ],
+    );
+
+    Orders peace(int to, [Terms terms = Terms.white]) => Orders()
+      ..offerPeace.add(to)
+      ..peaceTerms.addAll({if (terms != Terms.white) to: terms});
+
+    test("a vassal's land counts for its overlord's victory", () {
+      final g = gameWith(row, units: [5, 5, 5], winFraction: 0.6);
+      g.state.closeWar(0, 1, 0, 0);
+      g.state.overlord[1] = 0;
+      expect(g.realmCount(0), 2);
+      final r = turn(g, {});
+      expect(g.state.ended, isTrue);
+      expect(g.state.winner, 0);
+      expect(r.events.last.kind, EventKind.gameOver);
+    });
+
+    test('a demand is met only when the other side accepts it', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {0: peace(1, Terms.reparations), 1: peace(0)});
+      expect(g.atWar(0, 1), isTrue, reason: 'white peace does not accept a demand');
+      final r = turn(g, {1: peace(0, Terms.accept)});
+      expect(g.atWar(0, 1), isFalse);
+      final signed = r.events.singleWhere((e) => e.kind == EventKind.peaceSigned);
+      expect((Terms.values[signed.n1], signed.n2), (Terms.reparations, 0));
+      expect(g.state.tribute.keys, [directedKey(1, 0)]);
+    });
+
+    test('reparations move gold from the loser to the winner for a while', () {
+      final g = gameWith(row, units: [0, 0, 0], gold: [0, 0, 0]);
+      g.state.wars.clear();
+      g.state.tribute[directedKey(1, 0)] = 2;
+      final owed = (g.incomeOf(1) * Rules.reparationShare).floor();
+      expect(g.tributeOwed(1), owed);
+      expect(g.tributeOwed(0), -owed);
+      turn(g, {});
+      expect(g.state.gold[0], g.incomeOf(0) + owed);
+      expect(g.state.gold[1], g.incomeOf(1) - owed);
+      turn(g, {});
+      turn(g, {});
+      expect(g.state.tribute, isEmpty);
+    });
+
+    test('a vassal pays tribute, follows its overlord to war and may break free', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {0: peace(1, Terms.vassal), 1: peace(0, Terms.accept)});
+      expect(g.overlordOf(1), 0);
+      expect(g.vassalsOf(0), [1]);
+      expect(g.tributeOwed(1), (g.incomeOf(1) * Rules.vassalTribute).floor());
+      expect(g.canDeclareWar(1, 2), isFalse);
+      expect(g.canDeclareWar(0, 1), isFalse);
+      g.state.truceUntil.clear();
+      final r = turn(g, {0: Orders()..declareWar.add(2)});
+      expect(g.atWar(1, 2), isTrue);
+      expect(r.events.any((e) => e.kind == EventKind.calledToArms && e.a == 1 && e.n1 == 0), isTrue);
+      final free = turn(g, {1: Orders()..declareIndependence = true});
+      expect(g.overlordOf(1), -1);
+      expect(g.atWar(0, 1), isTrue);
+      expect(free.events.any((e) => e.kind == EventKind.independence), isTrue);
+    });
+
+    test('a vassal makes no war of its own', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      g.state.wars.clear();
+      g.state.overlord[1] = 0;
+      g.state.wars.add(pairKey(1, 2));
+      turn(g, {});
+      expect(g.atWar(1, 2), isFalse);
+    });
+
+    test('captured provinces count in the war score', () {
+      final w = tinyWorld(
+        links: [
+          [1],
+          [0, 2],
+          [1],
+        ],
+        owners: [0, 1, 1],
+        wars: [
+          [0, 1],
+        ],
+      );
+      final h = gameWith(w, units: [300, 0, 5]);
+      turn(h, {0: Orders()..moves.add(const MoveOrder(0, 1, 300))});
+      expect(h.warScore(0, 1), 1);
+      expect(h.warScore(1, 0), -1);
+    });
+  });
+
+  group('chronicle', () {
+    test('records every turn from the start, then thins itself out', () {
+      final g = gameWith(line, units: [3, 4, 5, 6]);
+      expect(g.state.chronicle, hasLength(1));
+      for (var i = 0; i < Rules.chronicleSamples; i++) {
+        turn(g, {});
+      }
+      expect(g.state.chronicle.length, lessThanOrEqualTo(Rules.chronicleSamples));
+      expect(g.state.chronicleEvery, 2);
+      expect(g.state.chronicleFrom, 0);
+      final latest = g.state.chronicle.last;
+      expect(g.state.chronicleFrom + (g.state.chronicle.length - 1) * g.state.chronicleEvery, g.state.turn);
+      expect([latest[0], latest[1], latest[2]], [g.provinceCount(0), g.unitsOf(0), g.incomeOf(0)]);
+    });
+
+    test('a game saved before the chronicle starts one where it stands', () {
+      final g = gameWith(line, units: [1, 1, 1, 1]);
+      turn(g, {});
+      turn(g, {});
+      g.state.chronicle.clear();
+      turn(g, {});
+      expect(g.state.chronicleFrom, 3);
+      expect(g.state.chronicle, hasLength(1));
+    });
+  });
+
+  group('relations and pacts', () {
+    // Three at peace in a row: 0 | 1 | 2, with 1 and 2 allied.
+    final row = tinyWorld(
+      links: [
+        [1],
+        [0, 2],
+        [1],
+      ],
+      owners: [0, 1, 2],
+      alliances: [
+        [1, 2],
+      ],
+    );
+
+    test('start warm between allies and cold between enemies', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      expect(g.state.relation(1, 2), Rules.alliedRelation);
+      expect(g.state.relation(0, 1), 0);
+      expect(gameWith(line, units: [1, 1, 1, 1]).state.relation(0, 1), Rules.warRelation);
+    });
+
+    test('sink when war is declared, and further every turn of it', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.state.relation(0, 1), Rules.declaredRelation);
+      expect(g.state.relation(0, 2), Rules.declaredRelation, reason: 'the ally was called to arms');
+      turn(g, {});
+      expect(g.state.relation(0, 1), Rules.declaredRelation - 1);
+    });
+
+    test('an envoy costs gold and warms relations', () {
+      final g = gameWith(row, units: [0, 0, 0], gold: [100, 100, 100]);
+      final cost = g.envoyCost(1);
+      final income = g.incomeOf(0);
+      final r = turn(g, {0: Orders()..envoys.add(1)});
+      expect(g.state.relation(0, 1), Rules.envoyGain);
+      expect(g.state.gold[0], 100 - cost + income);
+      expect(r.events.singleWhere((e) => e.kind == EventKind.envoy).b, 1);
+    });
+
+    test('a gift moves gold across and warms relations by what it is worth to the receiver', () {
+      final g = gameWith(row, units: [0, 0, 0], gold: [100, 0, 0]);
+      final gift = g.incomeOf(1);
+      turn(g, {0: Orders()..gifts[1] = gift});
+      expect(g.state.relation(0, 1), Rules.giftGain);
+      expect(g.state.gold[1], gift + g.incomeOf(1));
+      expect(g.giftGain(1, 1000), Rules.giftMaxGain);
+    });
+
+    test('no envoys or gifts to an enemy', () {
+      final g = gameWith(line, units: [1, 1, 1, 1], gold: [100, 100]);
+      final before = g.state.relation(0, 1);
+      turn(g, {
+        0: Orders()
+          ..envoys.add(1)
+          ..gifts[1] = 50,
+      });
+      expect(g.state.relation(0, 1), before - 1);
+      expect(g.state.gold[1], 100 + g.incomeOf(1) - g.upkeepOf(1));
+    });
+
+    test('drift back towards indifference in peace', () {
+      final g = gameWith(row, units: [0, 0, 0]);
+      g.state.setRelation(0, 1, 10);
+      for (var i = 0; i < Rules.relationDriftTurns * 3; i++) {
+        turn(g, {});
+      }
+      expect(g.state.relation(0, 1), 7);
+    });
+
+    test('a pact needs both sides, forbids war while it lasts, then lapses', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      final r1 = turn(g, {0: Orders()..offerPact.add(1)});
+      expect(has(r1, EventKind.pactOffered), isTrue);
+      final r2 = turn(g, {1: Orders()..offerPact.add(0)});
+      expect(has(r2, EventKind.pactSigned), isTrue);
+      expect(g.pactLeft(0, 1), Rules.pactTurns);
+      expect(g.canDeclareWar(0, 1), isFalse);
+      expect(g.canDeclareWar(1, 0), isFalse);
+      turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.atWar(0, 1), isFalse);
+      while (g.pactLeft(0, 1) > 0) {
+        turn(g, {});
+      }
+      expect(g.state.pacts, isEmpty);
+      expect(g.canDeclareWar(0, 1), isTrue);
+    });
+
+    test('a pact with the attacker keeps an ally out of the war', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      g.state.pacts[pairKey(0, 2)] = g.state.turn + 10;
+      expect(g.wouldDefend(0, 1), isEmpty);
+      turn(g, {0: Orders()..declareWar.add(1)});
+      expect(g.atWar(0, 1), isTrue);
+      expect(g.atWar(0, 2), isFalse);
+    });
+
+    test('leaving an alliance costs relations', () {
+      final g = gameWith(row, units: [5, 5, 5]);
+      turn(g, {1: Orders()..breakAlliance.add(2)});
+      expect(g.state.relation(1, 2), Rules.alliedRelation + Rules.brokenRelation);
+    });
+  });
+
+  group('happenings', () {
+    test('never happen with random events off', () {
+      final g = gameWith(line, units: [5, 5, 5, 5]);
+      for (var i = 0; i < 200; i++) {
+        expect(has(turn(g, {}), EventKind.happening), isFalse);
+      }
+    });
+
+    test('happen now and then with them on, the same way for the same seed', () {
+      String play() {
+        final g = Game.start(line, human: -1, seed: 9, randomEvents: true);
+        final kinds = <int>[];
+        for (var i = 0; i < 300; i++) {
+          kinds.addAll([
+            for (final e in turn(g, {}).events)
+              if (e.kind == EventKind.happening) e.n1,
+          ]);
+        }
+        expect(kinds, isNotEmpty);
+        return kinds.join(',');
+      }
+
+      expect(play(), play());
+    });
+
+    test("the player's answer waits for their orders and is paid first", () {
+      final g = gameWith(line, units: [1, 1, 1, 1], gold: [100, 100], human: 0);
+      g.state.development[1] = 2;
+      g.state.pending[0] = encodePending(Happening.strike, 1);
+      final cost = happeningCost(g, 0, Happening.strike, 1, 0);
+      final r = turn(g, {0: Orders()..answer = 0});
+      final e = r.events.firstWhere((e) => e.kind == EventKind.happening);
+      expect((e.n1, e.n2, e.n3), (Happening.strike.index, 0, cost));
+      expect(g.state.pending, isEmpty);
+      expect(g.state.development[1], 2);
+    });
+
+    test('no answer, or one the treasury cannot pay, takes the course that costs nothing', () {
+      final g = gameWith(line, units: [1, 1, 1, 1], gold: [0, 100], human: 0);
+      g.state.development[1] = 2;
+      g.state.pending[0] = encodePending(Happening.strike, 1);
+      turn(g, {0: Orders()..answer = 0});
+      expect(g.state.development[1], 1, reason: 'the strike was put down');
+      g.state.pending[0] = encodePending(Happening.refugees, 1);
+      final r = turn(g, {});
+      expect(r.events.firstWhere((e) => e.kind == EventKind.happening).n2, 1);
+      expect(g.state.development[1], 1);
+    });
+
+    test('an inventor funded is research done', () {
+      final g = gameWith(line, units: [1, 1, 1, 1], human: 0);
+      g.state.pending[0] = encodePending(Happening.inventor, 0);
+      final next = g.researchCost(0, Field.values[g.state.researchFocus[0]]);
+      turn(g, {0: Orders()..answer = 0});
+      expect(g.state.research[0][g.state.researchFocus[0]], greaterThanOrEqualTo((next * inventorShare).floor()));
+    });
+  });
+
+  group('the sea', () {
+    // Two islands on one sea, a third on the next, a fourth on a sea of its
+    // own, and an inland province behind the first.
+    final islands = tinyWorld(
+      links: [
+        [4],
+        [],
+        [],
+        [],
+        [0],
+      ],
+      owners: [0, 1, 1, 1, 0],
+      wars: [
+        [0, 1],
+      ],
+      coast: [
+        [0],
+        [0],
+        [1],
+        [2],
+        [],
+      ],
+      seas: const [
+        SeaZone('Near', [1]),
+        SeaZone('Next', [0]),
+        SeaZone('Far', []),
+      ],
+    );
+
+    test('a coast reaches every coast on its sea and the next', () {
+      expect(islands.landings[0], {1, 2});
+      expect(islands.landings[2], {0, 1});
+      expect(islands.landings[3], isEmpty);
+      expect(islands.landings[4], isEmpty);
+      expect(islands.reaches(0, 3), isFalse);
+    });
+
+    test('troops land at less than full strength, and only within reach', () {
+      final g = gameWith(islands, units: [100, 0, 0, 0, 0]);
+      final r = turn(g, {
+        0: Orders()
+          ..moves.add(const MoveOrder(0, 1, 60))
+          ..moves.add(const MoveOrder(0, 3, 40)),
+      });
+      expect(g.state.owner[1], 0);
+      expect(g.state.owner[3], 1, reason: 'too far by sea');
+      expect(g.state.units[0], 40);
+      final landing = r.movements.single;
+      expect((landing.to, landing.bySea, landing.hostile), (1, true, true));
+      final battle = r.events.firstWhere((e) => e.kind == EventKind.battle);
+      // A landing of 60 fights like 45: it keeps less than a march would.
+      expect(g.state.units[1], lessThan(60 - battle.n2));
+    });
+  });
+
   group('history', () {
     World scripted() => tinyWorld(
           links: [
@@ -729,7 +1076,33 @@ void main() {
     final g = gameWith(line, units: [1, 1, 1, 1]);
     final json = jsonDecode(jsonEncode(g.toJson())) as Map<String, dynamic>;
     final state = json['state'] as Map<String, dynamic>;
-    for (final key in ['alliances', 'allianceOffers', 'allianceAsked', 'forts', 'development', 'heldSince', 'tech', 'research', 'researchFocus', 'researchShare', 'difficulty', 'fog']) {
+    for (final key in [
+      'alliances',
+      'allianceOffers',
+      'allianceAsked',
+      'peaceTerms',
+      'gains',
+      'tribute',
+      'overlord',
+      'chronicle',
+      'chronicleEvery',
+      'chronicleFrom',
+      'forts',
+      'development',
+      'heldSince',
+      'tech',
+      'research',
+      'researchFocus',
+      'researchShare',
+      'difficulty',
+      'fog',
+      'randomEvents',
+      'relations',
+      'pacts',
+      'pactOffers',
+      'pactAsked',
+      'pending',
+    ]) {
       expect(state.remove(key), isNotNull, reason: key);
     }
     final back = Game.fromJson(line, json);
@@ -739,6 +1112,8 @@ void main() {
     expect(back.techLevel(0, Field.army), 0);
     expect(back.state.difficulty, Rules.normalDifficulty);
     expect(back.state.fog, isFalse);
+    expect(back.state.randomEvents, isTrue);
+    expect(back.state.relation(0, 1), 0);
     expect(Orders.fromJson({'moves': [], 'recruits': [], 'declareWar': [], 'offerPeace': []}).isEmpty, isTrue);
   });
 
@@ -757,7 +1132,13 @@ void main() {
       ..offerAlliance.add(8)
       ..breakAlliance.add(9)
       ..builds.add(const BuildOrder(10, Project.develop))
-      ..research = const ResearchPlan(Field.industry, 30);
+      ..research = const ResearchPlan(Field.industry, 30)
+      ..peaceTerms[7] = Terms.vassal
+      ..declareIndependence = true
+      ..offerPact.add(11)
+      ..envoys.add(12)
+      ..gifts[13] = 40
+      ..answer = 1;
     final back = Orders.fromJson(jsonDecode(jsonEncode(o.toJson())) as Map<String, dynamic>);
     expect(jsonEncode(back.toJson()), jsonEncode(o.toJson()));
   });

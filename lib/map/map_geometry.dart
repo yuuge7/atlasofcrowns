@@ -33,14 +33,13 @@ class BorderArc {
 /// both sides, so the same data gives filled shapes, the coastline and the
 /// borders between any two owners.
 class MapGeometry {
-  MapGeometry._(this.size, this.provinces, this.borders, this.coast, this.graticule, this.crossings);
+  MapGeometry._(this.size, this.provinces, this.borders, this.coast, this.graticule, this.crossings, this.seaNames);
 
   factory MapGeometry.fromJson(Map<String, dynamic> json) {
     final scale = (json['scale'] as num).toDouble();
     final size = Size((json['width'] as num).toDouble(), (json['height'] as num).toDouble());
     final arcs = [
-      for (final arc in json['arcs'] as List)
-        Float32List.fromList([for (final v in arc as List) (v as num) / scale]),
+      for (final arc in json['arcs'] as List) Float32List.fromList([for (final v in arc as List) (v as num) / scale]),
     ];
 
     final users = List<List<int>>.generate(arcs.length, (_) => []);
@@ -133,7 +132,11 @@ class MapGeometry {
       }
     }
 
-    return MapGeometry._(size, provinces, borders, coast, _graticule(json['bbox'] as List?, size), crossings);
+    final seaNames = [
+      for (final z in (json['seas'] as List? ?? const []).cast<Map<String, dynamic>>())
+        (z['name'] as String, Offset(((z['label'] as List)[0] as num) / scale, ((z['label'] as List)[1] as num) / scale)),
+    ];
+    return MapGeometry._(size, provinces, borders, coast, _graticule(json['bbox'] as List?, size), crossings, seaNames);
   }
 
   final Size size;
@@ -146,6 +149,9 @@ class MapGeometry {
 
   /// Shore-to-shore ends of every sea link.
   final List<(Offset, Offset)> crossings;
+
+  /// Each sea zone's name and where to letter it.
+  final List<(String, Offset)> seaNames;
 
   /// Province under [point] (map units), or -1 for open sea.
   int provinceAt(Offset point) {

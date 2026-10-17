@@ -6,11 +6,16 @@ enum EventKind {
   /// [GameEvent.a] declared war on [GameEvent.b].
   warDeclared,
 
-  /// [GameEvent.a] and [GameEvent.b] made peace.
+  /// [GameEvent.a] and [GameEvent.b] made peace, on the terms with index
+  /// [GameEvent.n1] that nation [GameEvent.n2] asked for (-1 for white).
   peaceSigned,
 
-  /// [GameEvent.a] offers peace to [GameEvent.b], who has not answered yet.
+  /// [GameEvent.a] offers peace to [GameEvent.b], who has not answered yet,
+  /// on the terms with index [GameEvent.n1].
   peaceOffered,
+
+  /// [GameEvent.a] threw off its overlord [GameEvent.b] and is at war with it.
+  independence,
 
   /// [GameEvent.a] went to war with [GameEvent.b] because [GameEvent.b]
   /// declared war on [GameEvent.n1], an ally of [GameEvent.a].
@@ -24,6 +29,28 @@ enum EventKind {
 
   /// [GameEvent.a] left its alliance with [GameEvent.b].
   allianceBroken,
+
+  /// [GameEvent.a] and [GameEvent.b] signed a non-aggression pact.
+  pactSigned,
+
+  /// [GameEvent.a] offers [GameEvent.b] a non-aggression pact, not yet
+  /// answered.
+  pactOffered,
+
+  /// [GameEvent.a] gave [GameEvent.b] [GameEvent.n1] gold; relations rose
+  /// by [GameEvent.n2].
+  gift,
+
+  /// [GameEvent.a] sent an envoy to [GameEvent.b]; relations rose by
+  /// [GameEvent.n2].
+  envoy,
+
+  /// Something happened by chance to [GameEvent.a], in
+  /// [GameEvent.province]: the happening with index [GameEvent.n1],
+  /// answered with choice [GameEvent.n2] (-1 while the answer is awaited).
+  /// [GameEvent.n3] is the gold, units or research it came to, and
+  /// [GameEvent.b] the other nation involved, if any.
+  happening,
 
   /// [GameEvent.a] attacked [GameEvent.b] in [GameEvent.province] with
   /// [GameEvent.n1] units against [GameEvent.n2]; the winner kept
@@ -74,10 +101,28 @@ class GameEvent {
   bool involves(int n) => n >= 0 && (a == n || b == n);
 }
 
+/// Units [nation] actually sent from [from] to [to] in a turn: a march
+/// through its own land, or an attack when [hostile].
+class Movement {
+  const Movement(this.nation, this.from, this.to, this.count, {required this.hostile, this.bySea = false});
+
+  final int nation;
+  final int from;
+  final int to;
+  final int count;
+  final bool hostile;
+
+  /// Shipped across a sea zone rather than marched overland.
+  final bool bySea;
+}
+
 class TurnReport {
-  const TurnReport(this.turn, this.events);
+  const TurnReport(this.turn, this.events, [this.movements = const []]);
 
   /// The turn that just ended.
   final int turn;
   final List<GameEvent> events;
+
+  /// Every move the rules let through, in the order it was carried out.
+  final List<Movement> movements;
 }

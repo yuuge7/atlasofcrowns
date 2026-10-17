@@ -558,8 +558,77 @@ const mapJson = {
   })),
 };
 mapJson.build = createHash('sha1').update(JSON.stringify(mapJson)).digest('hex').slice(0, 10);
+// Sea zones come after the build id: they never move a province, so saves
+// made before them stay good.
+Object.assign(mapJson, seaZones());
 const mapText = JSON.stringify(mapJson);
 writeFileSync(path.join(root, 'assets/map/europe.json'), mapText);
+
+// ---------------------------------------------------------------- sea zones
+/**
+ * The sea zones of the config and, for every province, the zones its coast
+ * touches: each stretch of coast goes to the zone of the nearest sea point
+ * within SEA_REACH_KM. Coast is an arc on a province's outer ring that no
+ * other province shares and that does not run along the edge of the window;
+ * shores of lakes lie on inner rings and are left out.
+ */
+function seaZones() {
+  const zones = cfg.SEAS;
+  const zoneIndex = new Map(zones.map((z, i) => [z.name, i]));
+  const toLonLat = ([x, y]) => [cfg.BBOX.w + (x / MAP_W) * (cfg.BBOX.e - cfg.BBOX.w), mercLat(Y1 - y * UNIT)];
+  const km = ([lon1, lat1], [lon2, lat2]) => {
+    const rad = Math.PI / 180;
+    const a = Math.sin(((lat2 - lat1) * rad) / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
+    return 2 * 6371 * Math.asin(Math.sqrt(a));
+  };
+  const onEdge = ([x, y]) => x < 0.5 || y < 0.5 || x > MAP_W - 0.5 || y > MAP_H - 0.5;
+  const users = arcUsers(geoms);
+  const coast = provinces.map(() => new Set());
+  const unplaced = new Set();
+  geoms.forEach((g, id) => {
+    for (const polygon of polygonsOf(g)) {
+      for (const ref of polygon[0]) {
+        const arc = arcsMap[arcId(ref)];
+        if (users.get(arcId(ref)).size !== 1 || arc.every(onEdge)) continue;
+        // Sample the arc every few points: a long coast may face two seas.
+        const step = Math.max(1, Math.floor(arc.length / 12));
+        for (let i = 0; i < arc.length; i += step) {
+          if (onEdge(arc[i])) continue;
+          const at = toLonLat(arc[i]);
+          let best = -1;
+          let bestKm = cfg.SEA_REACH_KM;
+          zones.forEach((z, zi) => {
+            for (const point of z.points) {
+              const d = km(at, point);
+              if (d < bestKm) {
+                bestKm = d;
+                best = zi;
+              }
+            }
+          });
+          if (best >= 0) coast[id].add(best);
+          else unplaced.add(provinces[id].name);
+        }
+      }
+    }
+  });
+  if (unplaced.size) console.warn(`  coast with no sea zone in reach: ${[...unplaced].join(', ')}`);
+  for (const z of zones) {
+    for (const other of z.links) {
+      if (!zoneIndex.has(other)) throw new Error(`sea ${z.name}: no sea called ${other}`);
+      if (!zones[zoneIndex.get(other)].links.includes(z.name)) throw new Error(`sea ${z.name} links to ${other}, but not back`);
+    }
+  }
+  const seaLines = zones.map((z, zi) => `${z.name}: ${provinces.filter((p) => coast[p.id].has(zi)).map((p) => p.name).join(', ')}`);
+  writeFileSync(out('seas.txt'), seaLines.join('\n'));
+  return {
+    seas: zones.map((z) => {
+      const [x, y] = lonLatToMap(z.label);
+      return { name: z.name, label: [Math.round(x * SCALE), Math.round(y * SCALE)], adj: z.links.map((l) => zoneIndex.get(l)).sort((a, b) => a - b) };
+    }),
+    coast: coast.map((set) => [...set].sort((a, b) => a - b)),
+  };
+}
 
 // ---------------------------------------------------------------- scenarios
 /**
@@ -601,6 +670,7 @@ function writeScenario(sc, { ownerOf, developmentOf, names = null }) {
       capital: capitals[i],
       readiness: n.ready ?? sc.DEFAULT_READY ?? 1,
       tech: n.tech ?? sc.DEFAULT_TECH ?? [0, 0],
+      flag: n.flag ?? '',
     })),
     owners,
     income,

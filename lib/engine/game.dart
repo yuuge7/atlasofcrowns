@@ -23,6 +23,7 @@ class Game {
     double winFraction = Rules.defaultWinFraction,
     int difficulty = Rules.normalDifficulty,
     bool fog = false,
+    bool randomEvents = false,
   }) {
     final nations = world.nations.length;
     final state = GameState(
@@ -31,6 +32,7 @@ class Game {
       winFraction: winFraction,
       difficulty: difficulty,
       fog: fog,
+      randomEvents: randomEvents,
       owner: List.of(world.startOwners),
       units: List.filled(world.provinces.length, 0),
       gold: List.filled(nations, 0),
@@ -44,9 +46,11 @@ class Game {
     );
     for (final war in world.startWars) {
       state.openWar(war[0], war[1], 0);
+      state.setRelation(war[0], war[1], Rules.warRelation);
     }
     for (final alliance in world.startAlliances) {
       state.alliances.add(pairKey(alliance[0], alliance[1]));
+      state.setRelation(alliance[0], alliance[1], Rules.alliedRelation);
     }
     final game = Game(world, state);
     for (var n = 0; n < nations; n++) {
@@ -63,7 +67,35 @@ class Game {
       final army = (income * Rules.startArmyPerIncome + mine.length * Rules.startArmyPerProvince) * world.nations[n].readiness;
       game._deployStartingArmy(n, mine, army.round());
     }
+    game.recordChronicle();
     return game;
+  }
+
+  /// Adds how the powers stand now to the [GameState.chronicle], thinning it
+  /// out once it is long.
+  void recordChronicle() {
+    if (state.chronicle.isEmpty) {
+      state
+        ..chronicleFrom = state.turn
+        ..chronicleEvery = 1;
+    }
+    if ((state.turn - state.chronicleFrom) % state.chronicleEvery != 0) return;
+    final held = List.filled(world.nations.length, 0);
+    final units = List.filled(world.nations.length, 0);
+    for (var p = 0; p < state.owner.length; p++) {
+      held[state.owner[p]]++;
+      units[state.owner[p]] += state.units[p];
+    }
+    state.chronicle.add([
+      for (var n = 0; n < world.nations.length; n++) ...[held[n], units[n], state.alive[n] ? incomeOf(n) : 0],
+    ]);
+    if (state.chronicle.length > Rules.chronicleSamples) {
+      final kept = [for (var i = 0; i < state.chronicle.length; i += 2) state.chronicle[i]];
+      state.chronicle
+        ..clear()
+        ..addAll(kept);
+      state.chronicleEvery *= 2;
+    }
   }
 
   /// Restores a saved game. Throws [FormatException] when the save belongs to
@@ -100,17 +132,88 @@ class Game {
           if (allied(n, other)) other,
       ];
 
+  /// The overlord of [n], or -1 for a free nation.
+  int overlordOf(int n) => state.overlord[n];
+
+  List<int> vassalsOf(int n) => [
+        for (var v = 0; v < state.overlord.length; v++)
+          if (state.overlord[v] == n) v,
+      ];
+
+  /// A vassal goes to war only with its overlord; an overlord does not war
+  /// on its own vassal.
   bool canDeclareWar(int a, int b) {
     if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
     if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
+    if (state.overlord[a] >= 0 || state.overlord[b] == a || pactLeft(a, b) > 0) return false;
     return state.turn >= (state.truceUntil[pairKey(a, b)] ?? 0);
+  }
+
+  /// Turns left of the non-aggression pact between [a] and [b], 0 when
+  /// there is none.
+  int pactLeft(int a, int b) => math.max(0, (state.pacts[pairKey(a, b)] ?? 0) - state.turn);
+
+  /// Whether [a] and [b] may sign a non-aggression pact, or renew one about
+  /// to end: both standing and free, at peace and not allied.
+  bool canOfferPact(int a, int b) {
+    if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
+    if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
+    if (state.overlord[a] >= 0 || state.overlord[b] >= 0) return false;
+    return pactLeft(a, b) < Rules.pactRenewTurns;
+  }
+
+  /// True while [from] has an unanswered pact offer to [to].
+  bool hasPactOffer(int from, int to) => state.pactOffers.containsKey(directedKey(from, to));
+
+  /// Whether [a] may send [b] an envoy or a gift: both standing, not at war.
+  bool canCourt(int a, int b) => a != b && a >= 0 && b >= 0 && b < world.nations.length && state.alive[a] && state.alive[b] && !atWar(a, b);
+
+  /// True when [from] offered [to] a pact in the last
+  /// [Rules.aiAllianceRetryTurns] turns.
+  bool askedPactRecently(int from, int to) => state.pactAsked.containsKey(directedKey(from, to));
+
+  /// Gold an envoy to [to] costs.
+  int envoyCost(int to) => math.max(Rules.envoyMinCost, (incomeOf(to) * Rules.envoyIncomeShare).round());
+
+  /// How much a gift of [gold] raises the relations of its giver with [to].
+  int giftGain(int to, int gold) => gold <= 0 ? 0 : (Rules.giftGain * gold / math.max(1, incomeOf(to))).round().clamp(1, Rules.giftMaxGain);
+
+  /// Provinces [a] has taken from [b] in their war, less those [b] took
+  /// back from [a].
+  int warScore(int a, int b) => (state.gains[directedKey(a, b)] ?? 0) - (state.gains[directedKey(b, a)] ?? 0);
+
+  /// What [from]'s standing peace offer to [to] asks.
+  Terms peaceTermsOf(int from, int to) => Terms.values[state.peaceTerms[directedKey(from, to)] ?? 0];
+
+  /// Whether [from] may ask [to] for [terms] in a peace: a vassal only of a
+  /// nation free and without vassals of its own.
+  bool canDemand(int from, int to, Terms terms) => terms != Terms.vassal || (state.overlord[to] < 0 && state.overlord[from] < 0 && vassalsOf(to).isEmpty);
+
+  /// Gold [n] pays out each turn in reparations and tribute, less what it
+  /// receives. [incomes] is [incomeOf] of every nation, when at hand.
+  int tributeOwed(int n, [List<int>? incomes]) {
+    int income(int m) => incomes?[m] ?? incomeOf(m);
+    var owed = 0;
+    for (final MapEntry(:key, :value) in state.tribute.entries) {
+      if (value <= state.turn) continue;
+      final (payer, payee) = pairOf(key);
+      if (payer == n) owed += (income(payer) * Rules.reparationShare).floor();
+      if (payee == n) owed -= (income(payer) * Rules.reparationShare).floor();
+    }
+    final lord = state.overlord[n];
+    if (lord >= 0) owed += (income(n) * Rules.vassalTribute).floor();
+    for (final v in vassalsOf(n)) {
+      owed -= (income(v) * Rules.vassalTribute).floor();
+    }
+    return owed;
   }
 
   /// Allies of [b] who would join if [a] declared war on it now: those not
   /// already at war with [a], not allied to it as well and not bound by a
-  /// truce with it. [allies] is [alliesOf] of [b], when already at hand.
+  /// truce with it, and [b]'s overlord. [allies] is [alliesOf] of [b], when
+  /// already at hand. Vassals follow their overlord into every war anyway.
   List<int> wouldDefend(int a, int b, [List<int>? allies]) => [
-        for (final ally in allies ?? alliesOf(b))
+        for (final ally in {...allies ?? alliesOf(b), if (state.overlord[b] >= 0) state.overlord[b]})
           if (canDeclareWar(ally, a)) ally,
       ];
 
@@ -119,6 +222,7 @@ class Game {
   bool canOfferAlliance(int a, int b) {
     if (a == b || a < 0 || b < 0 || b >= world.nations.length) return false;
     if (!state.alive[a] || !state.alive[b] || atWar(a, b) || allied(a, b)) return false;
+    if (state.overlord[a] >= 0 || state.overlord[b] >= 0) return false;
     for (var other = 0; other < world.nations.length; other++) {
       if ((allied(a, other) && atWar(b, other)) || (allied(b, other) && atWar(a, other))) return false;
     }
@@ -151,6 +255,9 @@ class Game {
     }
     return count;
   }
+
+  /// Provinces of [n] and of its vassals: what counts towards victory.
+  int realmCount(int n) => vassalsOf(n).fold(provinceCount(n), (sum, v) => sum + provinceCount(v));
 
   int unitsOf(int n) {
     var total = 0;
@@ -297,9 +404,10 @@ class Game {
   /// Provinces a nation must hold to win.
   int get winTarget => (state.winFraction * world.provinces.length).ceil();
 
-  /// Whether [n] may order units from [from] into [to] this turn.
+  /// Whether [n] may order units from [from] into [to] this turn, overland
+  /// or by sea.
   bool canMove(int n, int from, int to) {
-    if (state.owner[from] != n || !world.provinces[from].links.contains(to)) return false;
+    if (state.owner[from] != n || !world.reaches(from, to)) return false;
     final target = state.owner[to];
     return target == n || atWar(n, target);
   }

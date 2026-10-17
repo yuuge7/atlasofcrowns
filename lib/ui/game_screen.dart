@@ -5,10 +5,14 @@ import '../engine/orders.dart';
 import '../game/game_controller.dart';
 import '../map/map_view.dart';
 import '../theme.dart';
+import 'diplomacy_sheet.dart';
 import 'dispatches.dart';
+import 'flags.dart';
+import 'happening_dialog.dart';
 import 'main_menu.dart';
 import 'province_sheet.dart';
 import 'research_sheet.dart';
+import 'statistics_sheet.dart';
 import 'sheets.dart';
 import 'widgets.dart';
 
@@ -24,7 +28,7 @@ class GameScreen extends StatefulWidget {
   State<GameScreen> createState() => _GameScreenState();
 }
 
-class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _GameScreenState extends State<GameScreen> with TickerProviderStateMixin, WidgetsBindingObserver {
   final _topBar = GlobalKey();
 
   /// The End turn button and the province sheet under it.
@@ -34,6 +38,17 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       _c.overlay
         ..flash = 1 - Curves.easeOut.transform(_flash.value)
         ..changed();
+    });
+
+  /// The last turn played out on the map: the armies march for most of it,
+  /// the battles flare up near the end.
+  late final AnimationController _replay = AnimationController(vsync: this, duration: const Duration(milliseconds: 1700))
+    ..addListener(() {
+      final t = _replay.value;
+      _c.setReplay(march: Curves.easeInOut.transform((t / 0.62).clamp(0.0, 1.0)), battle: ((t - 0.5) / 0.2).clamp(0.0, 1.0));
+    })
+    ..addStatusListener((status) {
+      if (status == AnimationStatus.completed) _finishTurn();
     });
   int _revealed = -1;
   double _revealedAbove = 0;
@@ -45,7 +60,11 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _c.addListener(_onChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _measure());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _measure();
+      // A game saved with a happening unanswered asks again.
+      if (_c.pendingHappening != null && _c.orders.answer == null) showHappening(context, _c);
+    });
   }
 
   @override
@@ -53,6 +72,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     WidgetsBinding.instance.removeObserver(this);
     _c.removeListener(_onChanged);
     _flash.dispose();
+    _replay.dispose();
     _c.dispose();
     super.dispose();
   }
@@ -85,14 +105,32 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     _revealedAbove = bottom;
   }
 
+  /// Ends the turn and replays it, or skips the rest of the replay.
   void _endTurn() {
+    if (_c.replay != null) {
+      _replay.stop();
+      _finishTurn();
+      return;
+    }
     _c.endTurn();
+    if (!(MediaQuery.maybeDisableAnimationsOf(context) ?? false) && _c.replay != null) {
+      _replay.forward(from: 0);
+    } else {
+      _finishTurn();
+    }
+  }
+
+  /// Shows the turn as it now stands, and what came of it: first a
+  /// happening that needs an answer, then the dispatches.
+  Future<void> _finishTurn() async {
+    _c.endReplay();
     if (!(MediaQuery.maybeDisableAnimationsOf(context) ?? false) && _c.overlay.flashing.isNotEmpty) _flash.forward(from: 0);
     if (_c.state.ended) {
       _showGameOver();
-    } else if (Dispatches(_c.lastReport!, _c.world, _c.human).yours.isNotEmpty) {
-      showDispatches(context, _c);
+      return;
     }
+    if (_c.pendingHappening != null && _c.orders.answer == null) await showHappening(context, _c);
+    if (mounted && Dispatches(_c.lastReport!, _c.world, _c.human).yours.isNotEmpty) showDispatches(context, _c);
   }
 
   Future<void> _showGameOver() async {
@@ -102,7 +140,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     final String carryOn;
     if (s.winner >= 0 && s.winner == s.human) {
       title = 'Victory';
-      body = 'You hold ${_c.game.provinceCount(s.human)} of ${_c.world.provinces.length} provinces. The war is yours, ${_c.world.dateLabel(s.turn)}.';
+      body = 'You hold ${_c.game.realmCount(s.human)} of ${_c.world.provinces.length} provinces${_withVassals(s.human)}. The war is yours, ${_c.world.dateLabel(s.turn)}.';
       carryOn = 'KEEP PLAYING';
     } else if (s.winner < 0) {
       title = 'Defeat';
@@ -111,7 +149,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     } else {
       final winner = _c.world.nations[s.winner];
       title = '${winner.shortName} has won';
-      body = '${winner.name} holds ${_c.game.provinceCount(s.winner)} of ${_c.world.provinces.length} provinces, enough to decide the war.';
+      body = '${winner.name} holds ${_c.game.realmCount(s.winner)} of ${_c.world.provinces.length} provinces${_withVassals(s.winner)}, enough to decide the war.';
       carryOn = _c.commanding ? 'KEEP PLAYING' : 'KEEP WATCHING';
     }
     final leave = await showDialog<bool>(
@@ -134,6 +172,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
     }
   }
 
+  String _withVassals(int n) => _c.game.vassalsOf(n).isEmpty ? '' : ' with ${n == _c.human ? 'your' : 'its'} vassals';
+
   void _toMainMenu() {
     final assets = _c.assets;
     final saves = _c.saves;
@@ -152,6 +192,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
           OutlinedButton(onPressed: () => Navigator.pop(context, 'save'), child: const Text('SAVE GAME')),
           const SizedBox(height: 10),
           OutlinedButton(onPressed: () => Navigator.pop(context, 'load'), child: const Text('LOAD GAME')),
+          const SizedBox(height: 10),
+          OutlinedButton(onPressed: () => Navigator.pop(context, 'statistics'), child: const Text('STATISTICS')),
           const SizedBox(height: 10),
           OutlinedButton(onPressed: () => Navigator.pop(context, 'rules'), child: const Text('HOW TO PLAY')),
           const SizedBox(height: 10),
@@ -172,6 +214,8 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
       case 'load':
         final loaded = await showLoadSheet(context, _c.assets, _c.saves);
         if (loaded != null && mounted) _open(loaded);
+      case 'statistics':
+        showStatistics(context, _c);
       case 'rules':
         showHowToPlay(context);
       case 'quit':
@@ -191,11 +235,18 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
   void _showPowers() {
     showAtlasSheet<void>(
       context,
-      (context) => _Powers(_c, onLocate: (province) {
-        Navigator.pop(context);
-        _c.camera.centerOn(_c.assets.geometry.provinces[province].label);
-        _c.tapProvince(province);
-      }),
+      (sheet) => _Powers(
+        _c,
+        onLocate: (province) {
+          Navigator.pop(sheet);
+          _c.camera.centerOn(_c.assets.geometry.provinces[province].label);
+          _c.tapProvince(province);
+        },
+        onStatistics: () {
+          Navigator.pop(sheet);
+          showStatistics(context, _c);
+        },
+      ),
     );
   }
 
@@ -220,7 +271,15 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
         backgroundColor: AtlasColors.sea,
         body: Stack(children: [
           Positioned.fill(
-            child: MapView(scene: c.scene, camera: c.camera, overlay: c.overlay, onTapProvince: c.tapProvince, initialFocus: focus, initialZoom: 2.8),
+            child: MapView(
+              scene: c.scene,
+              camera: c.camera,
+              overlay: c.overlay,
+              // A tap while the turn replays skips to its end.
+              onTapProvince: (p) => c.replay != null ? _endTurn() : c.tapProvince(p),
+              initialFocus: focus,
+              initialZoom: 2.8,
+            ),
           ),
           Positioned(
             top: 0,
@@ -251,7 +310,7 @@ class _GameScreenState extends State<GameScreen> with SingleTickerProviderStateM
                       shadowColor: Colors.black,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5), side: const BorderSide(color: AtlasColors.baizeDeep, width: 1.5)),
                     ),
-                    child: Text(c.commanding ? 'END TURN' : 'NEXT MONTH', style: AtlasText.button.copyWith(fontSize: 18)),
+                    child: Text(c.replay != null ? 'SKIP' : (c.commanding ? 'END TURN' : 'NEXT MONTH'), style: AtlasText.button.copyWith(fontSize: 18)),
                   ),
                 ]),
               ),
@@ -278,13 +337,13 @@ class _TopBar extends StatelessWidget {
     final c = controller;
     final date = c.world.dateLabel(c.state.turn);
     final nation = c.human >= 0 ? c.world.nations[c.human] : null;
-    final net = c.commanding ? c.income - c.upkeep - c.researchSpend : 0;
-    final offers = c.peaceOffers.length + c.allianceOffers.length;
+    final net = c.commanding ? c.income - c.upkeep - c.researchSpend - c.tribute : 0;
+    final offers = c.peaceOffers.length + c.allianceOffers.length + c.pactOffers.length + (c.pendingHappening != null && c.orders.answer == null ? 1 : 0);
     return Panel(
       padding: EdgeInsets.fromLTRB(14, MediaQuery.paddingOf(context).top + 6, 4, 10),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         Row(children: [
-          if (nation != null) ...[NationSwatch(Color(nation.color), height: 30), const SizedBox(width: 10)],
+          if (nation != null) ...[NationFlag(nation, height: 26), const SizedBox(width: 10)],
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               FirstThatFits(c.commanding ? [nation!.name, nation.shortName] : const ['Watching the war'], style: AtlasText.title.copyWith(fontSize: 19)),
@@ -312,7 +371,7 @@ class _TopBar extends StatelessWidget {
                 child: Stat('Gold', '${c.goldFree}', detail: '${net >= 0 ? '+' : ''}$net a turn', detailColor: net >= 0 ? AtlasColors.ivoryDim : AtlasColors.signalText),
               ),
               Expanded(flex: 3, child: Stat('Army', '${c.army}')),
-              Expanded(flex: 4, child: Stat('Provinces', '${c.game.provinceCount(c.human)}', detail: 'of ${c.game.winTarget} to win')),
+              Expanded(flex: 4, child: Stat('Provinces', '${c.game.realmCount(c.human)}', detail: 'of ${c.game.winTarget} to win')),
             ]),
           ),
       ]),
@@ -329,12 +388,14 @@ class _MapModeButton extends StatelessWidget {
   static String label(MapMode mode) => switch (mode) {
         MapMode.political => 'Political',
         MapMode.diplomacy => 'Diplomacy',
+        MapMode.relations => 'Relations',
         MapMode.economy => 'Economy',
       };
 
   static String note(MapMode mode) => switch (mode) {
         MapMode.political => 'Who holds what',
-        MapMode.diplomacy => 'Allies, enemies and truces',
+        MapMode.diplomacy => 'Allies, enemies, truces and pacts',
+        MapMode.relations => 'How each nation feels about you',
         MapMode.economy => 'What each province yields',
       };
 
@@ -396,6 +457,26 @@ class _Legend extends StatelessWidget {
               Text(relation.legend.toUpperCase(), style: AtlasText.label.copyWith(color: AtlasColors.ivory, letterSpacing: 0.8)),
             ]),
         ]);
+      case MapMode.relations:
+        content = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
+          Text('HOW THEY FEEL ABOUT YOU', style: AtlasText.label.copyWith(color: AtlasColors.ivory)),
+          const SizedBox(height: 4),
+          Container(
+            height: 8,
+            decoration: BoxDecoration(
+              border: Border.all(color: AtlasColors.ink),
+              gradient: const LinearGradient(colors: [AtlasColors.mapEnemy, AtlasColors.mapNeutral, AtlasColors.mapFriend]),
+            ),
+          ),
+          const SizedBox(height: 2),
+          Row(children: [
+            Text('-100', style: AtlasText.label.copyWith(fontSize: 11)),
+            const Spacer(),
+            Text('0', style: AtlasText.label.copyWith(fontSize: 11)),
+            const Spacer(),
+            Text('+100', style: AtlasText.label.copyWith(fontSize: 11)),
+          ]),
+        ]);
       case MapMode.economy:
         content = Column(crossAxisAlignment: CrossAxisAlignment.stretch, mainAxisSize: MainAxisSize.min, children: [
           Text('INCOME A TURN', style: AtlasText.label.copyWith(color: AtlasColors.ivory)),
@@ -432,10 +513,11 @@ class _Legend extends StatelessWidget {
 
 /// Every nation still standing, strongest first, and how it stands with the player.
 class _Powers extends StatelessWidget {
-  const _Powers(this.controller, {required this.onLocate});
+  const _Powers(this.controller, {required this.onLocate, required this.onStatistics});
 
   final GameController controller;
   final ValueChanged<int> onLocate;
+  final VoidCallback onStatistics;
 
   @override
   Widget build(BuildContext context) {
@@ -451,6 +533,7 @@ class _Powers extends StatelessWidget {
     return AtlasSheet(
       title: 'The powers',
       note: '${c.game.winTarget} of ${c.world.provinces.length} provinces win the war',
+      action: IconButton(onPressed: onStatistics, icon: const Icon(Icons.show_chart), tooltip: 'Statistics over time'),
       body: ListView.builder(
         shrinkWrap: true,
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -462,9 +545,11 @@ class _Powers extends StatelessWidget {
               ? ('', AtlasColors.ivoryDim)
               : switch (c.relationTo(n.id)) {
                   Relation.you => ('You', AtlasColors.brassBright),
+                  Relation.bound => (c.game.overlordOf(n.id) == c.human ? 'Your vassal' : 'Your overlord', AtlasColors.brassBright),
                   Relation.ally => ('Ally', AtlasColors.brassBright),
                   Relation.war => (c.game.hasPeaceOffer(n.id, c.human) ? 'Offers peace' : 'At war', AtlasColors.signalText),
                   Relation.truce => ('Truce ${c.game.truceLeft(c.human, n.id)}', AtlasColors.ivoryDim),
+                  Relation.pact => ('Pact ${c.game.pactLeft(c.human, n.id)}', AtlasColors.ivoryDim),
                   Relation.peace => (c.game.hasAllianceOffer(n.id, c.human) ? 'Offers alliance' : 'Peace', AtlasColors.ivoryDim),
                 };
           return InkWell(
@@ -472,16 +557,23 @@ class _Powers extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Row(children: [
-                NationSwatch(Color(n.color)),
+                NationFlag(n, height: 22),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text(n.name, style: AtlasText.body, maxLines: 1, overflow: TextOverflow.ellipsis),
                     Text('${held[n.id]} provinces, ${army != null ? '$army units' : 'army unknown'}', style: AtlasText.note),
+                    if (c.game.overlordOf(n.id) >= 0 && c.game.overlordOf(n.id) != c.human) Text('Vassal of ${c.world.nations[c.game.overlordOf(n.id)].shortName}', style: AtlasText.note),
                     Text('Army ${c.game.techLevel(n.id, Field.army)}, industry ${c.game.techLevel(n.id, Field.industry)}', style: AtlasText.note),
                   ]),
                 ),
-                Text(standing.toUpperCase(), style: AtlasText.label.copyWith(color: color)),
+                Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                  Text(standing.toUpperCase(), style: AtlasText.label.copyWith(color: color)),
+                  if (c.commanding && n.id != c.human) ...[
+                    const SizedBox(height: 4),
+                    Text(signed(c.feeling(n.id)), style: AtlasText.figure.copyWith(fontSize: 15, color: c.feeling(n.id) < 0 ? AtlasColors.signalText : AtlasColors.ivoryDim)),
+                  ],
+                ]),
               ]),
             ),
           );

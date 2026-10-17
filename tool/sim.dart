@@ -22,7 +22,7 @@ void main(List<String> args) {
     jsonDecode(File('assets/map/europe.json').readAsStringSync()) as Map<String, dynamic>,
     jsonDecode(File('assets/scenarios/$scenario.json').readAsStringSync()) as Map<String, dynamic>,
   );
-  final game = Game.start(world, human: -1, seed: seed, winFraction: winFraction);
+  final game = Game.start(world, human: -1, seed: seed, winFraction: winFraction, randomEvents: args.length > 5 ? args[5] == 'events' : true);
   final tally = <EventKind, int>{};
   var lastCapture = 0;
   var longestQuiet = 0;
@@ -33,12 +33,13 @@ void main(List<String> args) {
       for (final n in world.nations)
         if (game.state.alive[n.id]) n,
     ]..sort((a, b) => game.provinceCount(b.id) - game.provinceCount(a.id));
-    final top = ranked.take(8).map((n) => '${n.tag} ${game.provinceCount(n.id)}p/${game.unitsOf(n.id)}u/${game.state.gold[n.id]}g').join('  ');
+    String lord(int n) => game.state.overlord[n] >= 0 ? '<${world.nations[game.state.overlord[n]].tag}' : '';
+    final top = ranked.take(8).map((n) => '${n.tag}${lord(n.id)} ${game.provinceCount(n.id)}p/${game.unitsOf(n.id)}u/${game.state.gold[n.id]}g').join('  ');
     final s = game.state;
     final forts = s.forts.fold(0, (a, b) => a + b);
     final developed = s.development.fold(0, (a, b) => a + b);
     stdout.writeln('${world.dateLabel(s.turn).padRight(9)} alive ${ranked.length.toString().padLeft(2)} wars ${s.wars.length.toString().padLeft(2)} '
-        'pacts ${s.alliances.length.toString().padLeft(2)} forts ${forts.toString().padLeft(3)} dev ${developed.toString().padLeft(4)} | $top');
+        'allies ${s.alliances.length.toString().padLeft(2)} pacts ${s.pacts.length.toString().padLeft(2)} forts ${forts.toString().padLeft(3)} dev ${developed.toString().padLeft(4)} | $top');
   }
 
   standings();

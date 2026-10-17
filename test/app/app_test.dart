@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:atlasofcrowns/data/game_assets.dart';
 import 'package:atlasofcrowns/data/save_store.dart';
 import 'package:atlasofcrowns/engine/game.dart';
+import 'package:atlasofcrowns/engine/happenings.dart';
 import 'package:atlasofcrowns/engine/orders.dart';
 import 'package:atlasofcrowns/engine/rules.dart';
+import 'package:atlasofcrowns/engine/state.dart';
 import 'package:atlasofcrowns/game/game_controller.dart';
 import 'package:atlasofcrowns/map/map_camera.dart';
 import 'package:atlasofcrowns/map/map_scene.dart';
@@ -41,8 +43,7 @@ void main() {
     }
   });
 
-  GameController newController(String tag) =>
-      GameController(assets: assets, saves: saves, game: Game.start(world, human: nation(tag), seed: 7));
+  GameController newController(String tag) => GameController(assets: assets, saves: saves, game: Game.start(world, human: nation(tag), seed: 7));
 
   group('map geometry', () {
     test('a tap on any province label finds that province', () {
@@ -155,6 +156,21 @@ void main() {
       expect(c.movable(posen), units);
     });
 
+    test('coasts across the sea are offered apart from the land targets', () {
+      final c = newController('UKG');
+      final london = province('London');
+      c.tapProvince(london);
+      c.beginMove();
+      expect(c.overlay.landings, isNotEmpty);
+      expect(c.overlay.landings.intersection(c.overlay.targets), isEmpty);
+      final hamburg = province('Hamburg');
+      expect(c.overlay.landings, contains(hamburg), reason: 'London and Hamburg share the North Sea');
+      c.tapProvince(hamburg);
+      expect(c.mode, InputMode.moveAmount);
+      c.confirmMove(5);
+      expect(c.overlay.arrows.single.naval, isTrue);
+    });
+
     test('provinces of a nation at peace are not offered as targets', () {
       final c = newController('GER');
       final hamburg = province('Hamburg');
@@ -263,10 +279,40 @@ void main() {
       expect(c.scene.fillOf(berlin), AtlasColors.mapYou);
       expect(c.scene.fillOf(paris), AtlasColors.mapEnemy);
       expect(c.scene.fillOf(prague), AtlasColors.mapAlly);
+      c.setMapMode(MapMode.relations);
+      expect(c.scene.fillOf(berlin), AtlasColors.mapYou);
+      expect(c.scene.fillOf(prague), relationColor(Rules.alliedRelation));
+      expect(c.scene.fillOf(paris), relationColor(Rules.warRelation));
       c.setMapMode(MapMode.economy);
       expect(c.scene.fillOf(berlin), incomeColor(c.game.provinceIncome(berlin)));
       c.setMapMode(MapMode.political);
       expect(c.scene.fillOf(berlin), Color(world.nations[nation('GER')].color));
+    });
+
+    test('a turn is replayed over the position before it, then shown as it stands', () {
+      final c = newController('GER');
+      final before = List.of(c.state.owner);
+      final berlin = province('Berlin');
+      final units = c.state.units[berlin];
+      c.tapProvince(berlin);
+      c.beginMove();
+      c.tapProvince(c.targetsFrom(berlin).first);
+      c.confirmMove(5);
+      c.endTurn();
+      final replay = c.replay!;
+      expect(replay.owners, before);
+      expect(replay.units[berlin], units - 5);
+      expect(replay.movements.where((m) => m.from == berlin && m.count == 5), isNotEmpty);
+      expect(c.scene.owners, before);
+      expect(c.overlay.movements, same(replay.movements));
+      expect(c.overlay.arrows, isEmpty);
+      c.setReplay(march: 0.5, battle: 1);
+      expect(c.overlay.march, 0.5);
+      c.endReplay();
+      expect(c.replay, isNull);
+      expect(c.scene.owners, c.state.owner);
+      expect(c.overlay.movements, isEmpty);
+      expect(c.overlay.units![berlin], c.state.units[berlin]);
     });
 
     test('a march walks one province a turn to a far province of yours', () {
@@ -325,6 +371,60 @@ void main() {
       final back = GameController(assets: assets, saves: saves, game: loaded.game, orders: loaded.orders, marches: loaded.marches);
       expect(back.marches.single.to, province('Munich'));
       expect(back.marchOf(back.orders.moves.single), same(back.marches.single));
+    });
+
+    test('peace is offered on terms, and an offer with demands is accepted as it stands', () {
+      final c = newController('GER');
+      final france = nation('FRA');
+      c.offerPeace(france, Terms.reparations);
+      expect(c.orders.offerPeace, {france});
+      expect(c.orders.peaceTerms[france], Terms.reparations);
+      c.offerPeace(france, null);
+      expect(c.orders.offerPeace, isEmpty);
+      expect(c.orders.peaceTerms, isEmpty);
+      c.state.peaceOffers[directedKey(france, c.human)] = c.state.turn + 2;
+      c.state.peaceTerms[directedKey(france, c.human)] = Terms.vassal.index;
+      c.setPeaceOffered(france, true);
+      expect(c.orders.peaceTerms[france], Terms.accept);
+    });
+
+    test('envoys, gifts and pacts are ordered from the diplomacy sheet and paid from the free gold', () {
+      final c = newController('GER');
+      final denmark = nation('DEN');
+      final france = nation('FRA');
+      final free = c.goldFree;
+      c.setEnvoy(denmark, true);
+      expect(c.goldFree, free - c.game.envoyCost(denmark));
+      c.setEnvoy(france, true);
+      expect(c.orders.envoys, {denmark}, reason: 'no envoys to an enemy');
+      c.setGift(denmark, 30);
+      expect(c.goldFree, free - c.game.envoyCost(denmark) - 30);
+      c.setGift(denmark, 1 << 20);
+      expect(c.goldFree, 0, reason: 'a gift is capped by the free gold');
+      c.setGift(denmark, 0);
+      expect(c.orders.gifts, isEmpty);
+      c.setPactOffered(denmark, true);
+      expect(c.orders.offerPact, {denmark});
+      c.setPactOffered(france, true);
+      expect(c.orders.offerPact, {denmark});
+      c.endTurn();
+      expect(c.state.relation(c.human, denmark), greaterThanOrEqualTo(Rules.envoyGain - 1));
+    });
+
+    test('a happening waits for an answer, which sets its gold aside', () {
+      final c = newController('GER');
+      final berlin = province('Berlin');
+      c.state.pending[c.human] = encodePending(Happening.strike, berlin);
+      expect(c.pendingHappening, (Happening.strike, berlin));
+      final free = c.goldFree;
+      c.answerHappening(0);
+      expect(c.orders.answer, 0);
+      expect(c.goldFree, free - c.game.provinceIncome(berlin) * 3);
+      c.answerHappening(1);
+      expect(c.goldFree, free);
+      c.endTurn();
+      expect(c.pendingHappening, isNull);
+      expect(c.orders.answer, isNull);
     });
 
     test('war is declared from the province sheet and can be called off', () {

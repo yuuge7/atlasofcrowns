@@ -34,6 +34,21 @@ enum Project {
   develop,
 }
 
+/// What a peace offer asks of the enemy.
+enum Terms {
+  /// Each keeps what it holds.
+  white,
+
+  /// The enemy pays reparations.
+  reparations,
+
+  /// The enemy becomes a vassal.
+  vassal,
+
+  /// Agrees to whatever the enemy's own offer asks.
+  accept,
+}
+
 /// What can be researched.
 enum Field {
   /// Every unit fights harder.
@@ -80,6 +95,12 @@ class Orders {
       ..offerPeace.addAll((j['offerPeace'] as List).cast<int>())
       ..offerAlliance.addAll((j['offerAlliance'] as List? ?? const []).cast<int>())
       ..breakAlliance.addAll((j['breakAlliance'] as List? ?? const []).cast<int>())
+      ..peaceTerms.addAll({for (final e in (j['peaceTerms'] as Map<String, dynamic>? ?? const {}).entries) int.parse(e.key): Terms.values[e.value as int]})
+      ..declareIndependence = j['independence'] as bool? ?? false
+      ..offerPact.addAll((j['offerPact'] as List? ?? const []).cast<int>())
+      ..envoys.addAll((j['envoys'] as List? ?? const []).cast<int>())
+      ..gifts.addAll({for (final e in (j['gifts'] as Map<String, dynamic>? ?? const {}).entries) int.parse(e.key): e.value as int})
+      ..answer = j['answer'] as int?
       ..research = j['research'] == null ? null : ResearchPlan.fromJson(j['research'] as List);
   }
 
@@ -96,17 +117,48 @@ class Orders {
   /// Nations to offer peace to, or whose standing offer is accepted.
   final Set<int> offerPeace = {};
 
+  /// What each of those offers asks; white peace when not listed.
+  final Map<int, Terms> peaceTerms = {};
+
+  /// Throw off the overlord this turn, at the price of a war with it.
+  bool declareIndependence = false;
+
   /// Nations to offer an alliance to, or whose standing offer is accepted.
   final Set<int> offerAlliance = {};
 
   /// Allies to part ways with.
   final Set<int> breakAlliance = {};
 
+  /// Nations to offer a non-aggression pact to, or whose offer is accepted.
+  final Set<int> offerPact = {};
+
+  /// Nations to send an envoy to, each at [Game.envoyCost].
+  final Set<int> envoys = {};
+
+  /// Gold to give each nation listed.
+  final Map<int, int> gifts = {};
+
+  /// The answer, by index, to the happening waiting for this nation; null
+  /// lets it take its course.
+  int? answer;
+
   /// A new research plan, or null to keep the current one.
   ResearchPlan? research;
 
   bool get isEmpty =>
-      moves.isEmpty && recruits.isEmpty && builds.isEmpty && declareWar.isEmpty && offerPeace.isEmpty && offerAlliance.isEmpty && breakAlliance.isEmpty && research == null;
+      moves.isEmpty &&
+      recruits.isEmpty &&
+      builds.isEmpty &&
+      declareWar.isEmpty &&
+      offerPeace.isEmpty &&
+      offerAlliance.isEmpty &&
+      breakAlliance.isEmpty &&
+      offerPact.isEmpty &&
+      envoys.isEmpty &&
+      gifts.isEmpty &&
+      answer == null &&
+      research == null &&
+      !declareIndependence;
 
   Map<String, dynamic> toJson() => {
         'moves': [for (final m in moves) m.toJson()],
@@ -114,8 +166,14 @@ class Orders {
         'builds': [for (final b in builds) b.toJson()],
         'declareWar': declareWar.toList(),
         'offerPeace': offerPeace.toList(),
+        'peaceTerms': {for (final e in peaceTerms.entries) '${e.key}': e.value.index},
+        'independence': declareIndependence,
         'offerAlliance': offerAlliance.toList(),
         'breakAlliance': breakAlliance.toList(),
+        'offerPact': offerPact.toList(),
+        'envoys': envoys.toList(),
+        'gifts': {for (final e in gifts.entries) '${e.key}': e.value},
+        'answer': answer,
         'research': research?.toJson(),
       };
 }
